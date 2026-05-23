@@ -1,0 +1,4 @@
+torch==2.12.0
+websockets==16.0
+pandas==3.0.3
+scikit-learn==1.8.0

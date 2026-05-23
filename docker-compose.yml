@@ -1,0 +1,51 @@
+services:
+  central:
+    image: federared-system_image:latest
+    build: .
+    container_name: federated_central
+    command: ["python", "main.py", "true", "0.0.0.0:8765", "0.0.0.0:8765", "0"]
+    ports:
+      - "8765:8765"
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  node1:
+    image: federared-system_image:latest
+    build: .
+    container_name: federated_node1
+    command: ["python", "main.py", "false", "node1:8766", "central:8765", "1"]
+    depends_on:
+      - central
+    volumes:
+      - .:/app
+      - ./processed/Hospital_1.csv:/app/Hospital_1.csv:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  node2:
+    image: federared-system_image:latest
+    build: .
+    container_name: federated_node2
+    command: ["python", "main.py", "false", "node2:8767", "central:8765", "2"]
+    depends_on:
+      - central
+    volumes:
+      - .:/app
+      - ./processed/Hospital_2.csv:/app/Hospital_2.csv:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  node3:
+    image: federared-system_image:latest
+    build: .
+    container_name: federated_node3
+    command: ["python", "main.py", "false", "node3:8768", "central:8765", "3"]
+    depends_on:
+      - central
+    volumes:
+      - .:/app
+      - ./processed/Hospital_3.csv:/app/Hospital_3.csv:ro
+    environment:
+      - PYTHONUNBUFFERED=1
