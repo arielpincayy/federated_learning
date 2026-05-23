@@ -1,7 +1,7 @@
 import json
 import csv
 import os
-from config import NODES_JSON, METRICS_CSV
+from config import NODES_JSON, METRICS_CSV, RECEIVED_MODEL_FILENAME
 
 def get_ipport(addr: str) -> tuple[str, int]:
     """
@@ -47,3 +47,16 @@ def append_metrics(metrics_list: list[dict], round_n: int, path: str = METRICS_C
         for entry in metrics_list:
             writer.writerow({"round": round_n, **entry})
     print(f"[CENTRAL] Métricas de ronda {round_n} guardadas en {path}")
+
+
+async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL_FILENAME) -> str:
+    """
+    Entrada: datos binarios, directorio destino, nombre de archivo opcional.
+    Salida: ruta donde se guardó el archivo.
+    """
+    os.makedirs(save_path, exist_ok=True)
+    filepath = os.path.join(save_path, filename)
+    with open(filepath, "wb") as f:
+        f.write(data)
+    print(f"[FILE SAVED] {filepath}")
+    return filepath

@@ -7,50 +7,48 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from config import ROUNDS, EPOCHS, LEARNING_RATE, IN_FEATURES, LISTENER_DURATION, NODES_JSON, METRICS_CSV, MODEL_PATH, DATA_PATH
-from connections.client import send, send_identified, send_file_identified, server_file
+from config import ROUNDS, EPOCHS, LEARNING_RATE, IN_FEATURES, LISTENER_DURATION, NODES_JSON, METRICS_CSV, MODEL_PATH, DATA_PATH, SLEEP_INTERVAL, POST_ROUND_DELAY, NODES_LISTENER_DELAY
+from connections.client import send, send_identified, send_file_identified, send_file_to_nodes, send_message_to_nodes
 from connections.server import listener_ips, listener_nodes, listener_server
-from model.create_model import create_model, MLP
+from model.create_model import MLP
 from model.fed_model import ModelTrainer, federated_average
-from utils import save_nodes, append_metrics
+from utils import save_nodes, append_metrics, get_ipport
 
 async def central_main(addr: str):
     """
     Entrada: dirección propia del servidor central (host:port).
-    Salida: ninguna (orquesta K rondas de entrenamiento federado).
     """
-    #print("[CENTRAL] Creando modelo inicial...")
-    #create_model(in_features=IN_FEATURES, path=MODEL_PATH)
-
     print("[CENTRAL] Esperando nodos...")
-    ips = await listener_ips(addr, duration=10)
+    ips = await listener_ips(addr, duration=LISTENER_DURATION)
     print(f"[CENTRAL] Nodos registrados: {ips}")
-    
+
     nodes = save_nodes(ips, NODES_JSON)
     n = nodes["n_nodes"]
 
-    # {addr -> "Nodo_X"} sin incluir la clave "n_nodes"
-    nodes_by_addr = {addr: nid for nid, addr in nodes.items() if nid != "n_nodes"}
+    nodes_by_addr = {a: nid for nid, a in nodes.items() if nid != "n_nodes"}
+
+    print("[CENTRAL] Enviando mensaje START")
+    await send_message_to_nodes(node_addrs=ips, message="start", delay=LISTENER_DURATION)
+    print("[CENTRAL] Mensaje START enviado")
 
     for round_n in range(1, ROUNDS + 1):
         print(f"\n[CENTRAL] ══ Ronda {round_n}/{ROUNDS} ══")
 
-        # 1. Distribuir modelo global
-        print(f"[CENTRAL] Distribuyendo modelo a {n} nodo(s)...")
-        await server_file(addr, MODEL_PATH, n_clients=n, delay=LISTENER_DURATION * 6)
+        if round_n > 1:
+            await asyncio.sleep(POST_ROUND_DELAY)
+            print(f"[CENTRAL] Distribuyendo modelo agregado a {n} nodo(s)...")
+            await send_file_to_nodes(ips, MODEL_PATH, delay=LISTENER_DURATION * 6)
 
-        # 2. Recoger modelo (.pt) y métricas (JSON) — cierra al completar todos
         print(f"[CENTRAL] Esperando modelos y métricas de {n} nodo(s)...")
         round_dir = f"round_{round_n}"
         os.makedirs(round_dir, exist_ok=True)
         results = await listener_nodes(
             addr,
             nodes=nodes_by_addr,
-            delay=300,
+            delay=NODES_LISTENER_DELAY,
             save_path=round_dir,
         )
 
-        # 3. Separar modelos y métricas
         metrics_list = []
         model_paths  = []
         for node_id, received in results.items():
@@ -71,7 +69,6 @@ async def central_main(addr: str):
             print("[CENTRAL] No se recibieron modelos. Abortando.")
             break
 
-        # 4. FedAvg y actualizar modelo global
         print(f"[CENTRAL] Promediando {len(model_paths)} modelo(s)...")
         avg_state = federated_average(model_paths)
         torch.save(avg_state, MODEL_PATH)
@@ -82,30 +79,41 @@ async def central_main(addr: str):
 
 async def client_main(addr: str, server_addr: str):
     """
-    Entrada: dirección propia del nodo (host:port), dirección del servidor central,
-             identificador del nodo.
-    Salida: ninguna (ejecuta K rondas: descarga modelo, entrena, envía modelo y métricas).
+    Entrada: dirección propia del nodo (host:port), dirección del servidor central.
     """
+    os.makedirs(os.path.dirname(MODEL_PATH) or ".", exist_ok=True)
 
-    # Registro inicial
-    await asyncio.sleep(1)
+    # Registro inicial con el servidor central
+    await asyncio.sleep(SLEEP_INTERVAL)
     await send(server_addr, addr)
+
+    # === CAMBIO CLAVE AQUÍ ===
+    # Extraemos el puerto en el que este nodo específico debe escuchar
+    _, listen_port = get_ipport(addr)
+    # Usamos 0.0.0.0 para que escuche en todas las tarjetas de red (Docker o Raspberrys)
+    local_listen_addr = f"0.0.0.0:{listen_port}"
+
+    print(f"[NODE] Esperando mensaje START en el puerto {listen_port}...")
+    received = await listener_server(local_listen_addr, delay=LISTENER_DURATION * 100)
+    if received is None:
+        print(f"[NODE] No se recibió mensaje START. Abortando.")
+        return
 
     for round_n in range(1, ROUNDS + 1):
         print(f"\n[NODE] ══ Ronda {round_n}/{ROUNDS} ══")
 
-        # 1. Descargar modelo global
-        await asyncio.sleep(1)
-        print(f"[NODE] Descargando modelo global...")
-        received = await listener_server(server_addr, delay=60, file_path=MODEL_PATH)
-        if received is None:
-            print(f"[NODE] No se recibió modelo. Abortando.")
-            break
+        if round_n > 1:
+            print(f"[NODE] Descargando modelo agregado desde el servidor central...")
+            # === CAMBIO CLAVE AQUÍ ===
+            # El nodo se queda esperando pasivamente a que el central le empuje el archivo .pt
+            received = await listener_server(local_listen_addr, delay=LISTENER_DURATION * 6, file_path=MODEL_PATH)
+            if received is None:
+                print(f"[NODE] No se recibió modelo. Abortando.")
+                break
 
-        # 2. Entrenar con datos locales
         print(f"[NODE] Entrenando con {DATA_PATH} por {EPOCHS} épocas...")
         architecture = MLP(in_features=IN_FEATURES)
-        trainer = ModelTrainer(model_path=received, model_architecture=architecture)
+        trainer = ModelTrainer(model_path=MODEL_PATH, model_architecture=architecture)
         train_loader, test_loader = trainer.load_csv(DATA_PATH, label_col="label")
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(architecture.parameters(), lr=LEARNING_RATE)
@@ -113,11 +121,9 @@ async def client_main(addr: str, server_addr: str):
         metrics = trainer.evaluate(test_loader)
         trainer.save(MODEL_PATH)
 
-        # 3. Enviar modelo y métricas identificados
-        await asyncio.sleep(1)
+        await asyncio.sleep(SLEEP_INTERVAL)
         print(f"[NODE] Enviando modelo entrenado...")
         await send_file_identified(addr, server_addr, MODEL_PATH)
-
         await send_identified(addr, server_addr, json.dumps(metrics))
         print(f"[NODE] Métricas enviadas: {metrics}")
 
@@ -127,11 +133,9 @@ async def client_main(addr: str, server_addr: str):
 def main():
     if len(sys.argv) != 4:
         print(
-            "python3 main.py "
-            "<true|false> "
-            "<addr> "
-            "<server_addr> "
-            "<id>"
+            "Uso: python3 main.py <true|false> <addr> <server_addr>\n"
+            "  true  → servidor central\n"
+            "  false → nodo cliente"
         )
         return
 

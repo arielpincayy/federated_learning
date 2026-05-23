@@ -38,3 +38,11 @@ ACK_IDENTIFIED = "Identified"
 ACK_REGISTERED = "Registered"
 ACK_FILE_SUCCESS = "File received successfully"
 ACK_MESSAGE_SUCCESS = "Message received"
+
+# ── Timeouts / esperas ───────────────────────────────────────────────
+# Intervalo de polling / sleep usado por los servidores (segundos)
+SLEEP_INTERVAL = 1
+# Espera corta tras rondas para evitar solapamientos (segundos)
+POST_ROUND_DELAY = 2
+# Timeout por defecto para esperar modelos de nodos en el servidor central (segundos)
+NODES_LISTENER_DELAY = 300
