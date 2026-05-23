@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 import websockets
 
 from config import LISTENER_DURATION, RECEIVED_FILES_PATH, RECEIVED_MODEL_FILENAME, ACK_IDENTIFIED, ACK_REGISTERED, ACK_FILE_SUCCESS, ACK_MESSAGE_SUCCESS
@@ -21,28 +22,51 @@ async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL
 
 async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str]:
     """
-    Entrada: dirección del servidor (host:port), duración en segundos.
-    Salida: lista de direcciones únicas (host:port) tal como las enviaron los clientes.
+    Entrada: dirección del servidor (host:port), duración máxima de inactividad en segundos.
+    Salida: lista de direcciones únicas (host:port) registradas por los clientes.
+    
+    Lógica: El servidor se cerrará automáticamente si pasa 'duration' segundos 
+            sin que ningún nodo nuevo se conecte (Timeout dinámico tras el último nodo).
     """
     host, port = get_ipport(addr)
-    print(f"[TEMP SERVER] Listening on ws://{host}:{port} for {duration}s")
+    print(f"[TEMP SERVER] Iniciando en ws://{host}:{port}...")
+    print(f"[TEMP SERVER] El servidor cerrará tras {duration}s de inactividad desde el último nodo.")
 
     addrs = []
+    
+    # Registramos el timestamp actual como el punto de inicio de la espera
+    ultimo_registro_time = time.time()
 
     async def wrapper(websocket):
+        nonlocal ultimo_registro_time
         try:
             message = await websocket.recv()
             if isinstance(message, str) and message not in addrs:
                 addrs.append(message)
                 print(f"[TEMP SERVER] Nodo registrado: {message}")
+                
+                # ¡AQUÍ REINICIAMOS EL TEMPORIZADOR!
+                # Al actualizar el timestamp, obligamos al bucle principal a volver a esperar 'duration' segundos
+                ultimo_registro_time = time.time()
+                
                 await websocket.send(ACK_REGISTERED)
         except websockets.exceptions.ConnectionClosed:
             pass
 
+    # Iniciamos el servidor de websockets
     server = await websockets.serve(wrapper, host, port)
+    
     try:
-        await asyncio.sleep(duration)
+        # Bucle de monitoreo dinámico
+        while True:
+            await asyncio.sleep(1) # Revisamos las condiciones una vez por segundo
+            
+            tiempo_inactivo = time.time() - ultimo_registro_time
+            if tiempo_inactivo >= duration:
+                print(f"[TEMP SERVER] Se alcanzó el límite de {duration}s sin nuevas conexiones.")
+                break
     finally:
+        # Garantizamos que el servidor se cierre limpiamente al salir del bucle
         server.close()
         await server.wait_closed()
         print("[TEMP SERVER] Closed")
@@ -123,7 +147,7 @@ async def listener_nodes(
 async def listener_server(
     server_addr: str,
     delay: float,
-    save_path: str = None,
+    file_path: str = None,
     retry_interval: float = 1.0,
 ) -> str | None:
     """
@@ -145,14 +169,13 @@ async def listener_server(
                 message = await asyncio.wait_for(websocket.recv(), timeout=remaining)
 
                 if isinstance(message, bytes):
-                    path = save_path or "received_files"
-                    os.makedirs(path, exist_ok=True)
-                    filepath = os.path.join(path, "received_model.pt")
-                    with open(filepath, "wb") as f:
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                    with open(file_path, "wb") as f:
                         f.write(message)
-                    print(f"[FILE SAVED] {filepath}")
+                    print(f"[FILE SAVED] {file_path}")
                     await websocket.send("File received successfully")
-                    return filepath
+                    return file_path
                 else:
                     print(f"[CLIENT] Mensaje recibido: {message}")
                     await websocket.send("Message received")

@@ -2,6 +2,7 @@ import time
 import torch
 import torch.nn as nn
 import pandas as pd
+import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, recall_score, f1_score
@@ -26,21 +27,24 @@ class ModelTrainer:
         except Exception as e:
             print(f"[WARNING] No se pudieron cargar los pesos: {e}. Se entrena desde cero.")
 
-    def load_csv(
-        self,
-        path: str,
-        label_col: str = LABEL_COLUMN,
-        test_size: float = TEST_SIZE,
-        batch_size: int = BATCH_SIZE,
-    ) -> tuple[DataLoader, DataLoader]:
-        """
-        Entrada: ruta del CSV, nombre de la columna de etiquetas, proporción de test, tamaño de batch.
-        Salida: (train_loader, test_loader) listos para entrenar y evaluar.
-        """
+    def load_csv(self, path, label_col=LABEL_COLUMN, test_size=TEST_SIZE, batch_size=BATCH_SIZE):
         df = pd.read_csv(path)
+        
+        # 1. Eliminar filas con NaN
+        df = df.dropna()
+        
         X = df.drop(columns=[label_col]).values.astype("float32")
         y = df[label_col].values.astype("float32")
-
+        
+        # 2. Normalizar features (media 0, std 1)
+        from sklearn.preprocessing import StandardScaler
+        scaler = StandardScaler()
+        X = scaler.fit_transform(X).astype("float32")
+        
+        # 3. Debug rápido
+        print(f"[DATA] X: shape={X.shape}, nan={np.isnan(X).sum()}, max={X.max():.2f}")
+        print(f"[DATA] y: unique={np.unique(y)}")
+        
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=RANDOM_STATE
         )

@@ -9,11 +9,12 @@ LEARNING_RATE = 1e-3
 IN_FEATURES = 20
 
 # ── Rutas de archivos ──────────────────────────────────────────────────
-MODEL_PATH = "model.pt"
 NODES_JSON = "nodes.json"
 METRICS_CSV = "metrics.csv"
 RECEIVED_FILES_PATH = "received_files"
 CENTRAL_PATH = "CENTRAL"
+MODEL_PATH = "model.pt"
+DATA_PATH = "data/Hospital.csv"
 
 # ── Configuración de modelos neuronales ────────────────────────────────
 SEED = 42

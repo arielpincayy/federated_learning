@@ -1,3 +1,3 @@
 #!/bin/bash
 
-sudo rm -rf NODE_* logs/ model.pt model.pt __pycache__/ */__pycache__/ Hospital_* CENTRAL/
+sudo rm -rf round_* logs/ __pycache__/ */__pycache__/ metrics.csv nodes.json
