@@ -13,6 +13,9 @@ from connections.server import listener_nodes, listener_server
 from model.create_model import MLP
 from model.fed_model import ModelTrainer, federated_average
 from utils import save_nodes, append_metrics, get_ipport
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 async def central_main(addr: str, ips: list[str]):
     """
@@ -34,14 +37,14 @@ async def central_main(addr: str, ips: list[str]):
     local_listen_addr = f"0.0.0.0:{listen_port}"
 
     for round_n in range(1, ROUNDS + 1):
-        print(f"\n[CENTRAL] ══ Ronda {round_n}/{ROUNDS} ══")
+        logger.info(f"\n[CENTRAL] ══ Ronda {round_n}/{ROUNDS} ══")
 
         if round_n > 1:
             await asyncio.sleep(POST_ROUND_DELAY)
-            print(f"[CENTRAL] Distribuyendo modelo agregado a {n} nodo(s)...")
+            logger.info(f"[CENTRAL] Distribuyendo modelo agregado a {n} nodo(s)...")
             await send_file_to_nodes(ips, MODEL_PATH, delay=LISTENER_DURATION * 6)
 
-        print(f"[CENTRAL] Esperando modelos y métricas de {n} nodo(s)...")
+        logger.info(f"[CENTRAL] Esperando modelos y métricas de {n} nodo(s)...")
         round_dir = f"round_{round_n}"
         os.makedirs(round_dir, exist_ok=True)
         results = await listener_nodes(
@@ -68,15 +71,15 @@ async def central_main(addr: str, ips: list[str]):
         append_metrics(metrics_list, round_n, METRICS_CSV)
 
         if not model_paths:
-            print("[CENTRAL] No se recibieron modelos. Abortando.")
+            logger.error("[CENTRAL] No se recibieron modelos. Abortando.")
             break
 
-        print(f"[CENTRAL] Promediando {len(model_paths)} modelo(s)...")
+        logger.info(f"[CENTRAL] Promediando {len(model_paths)} modelo(s)...")
         avg_state = federated_average(model_paths)
         torch.save(avg_state, MODEL_PATH)
-        print(f"[CENTRAL] Modelo global actualizado → {MODEL_PATH}")
+        logger.info(f"[CENTRAL] Modelo global actualizado → {MODEL_PATH}")
 
-    print("\n[CENTRAL] Entrenamiento federado completado.")
+    logger.info("\n[CENTRAL] Entrenamiento federado completado.")
 
 
 async def client_main(addr: str, server_addr: str):
@@ -98,18 +101,18 @@ async def client_main(addr: str, server_addr: str):
     #    return
 
     for round_n in range(1, ROUNDS + 1):
-        print(f"\n[NODE] ══ Ronda {round_n}/{ROUNDS} ══")
+        logger.info(f"\n[NODE] ══ Ronda {round_n}/{ROUNDS} ══")
 
         if round_n > 1:
-            print(f"[NODE] Descargando modelo agregado desde el servidor central...")
+            logger.info(f"[NODE] Descargando modelo agregado desde el servidor central...")
             # === CAMBIO CLAVE AQUÍ ===
             # El nodo se queda esperando pasivamente a que el central le empuje el archivo .pt
             received = await listener_server(local_listen_addr, delay=LISTENER_DURATION * 6, file_path=MODEL_PATH)
             if received is None:
-                print(f"[NODE] No se recibió modelo. Abortando.")
+                logger.error(f"[NODE] No se recibió modelo. Abortando.")
                 break
 
-        print(f"[NODE] Entrenando con {DATA_PATH} por {EPOCHS} épocas...")
+        logger.info(f"[NODE] Entrenando con {DATA_PATH} por {EPOCHS} épocas...")
         architecture = MLP(in_features=IN_FEATURES)
         trainer = ModelTrainer(model_path=MODEL_PATH, model_architecture=architecture)
         train_loader, test_loader = trainer.load_csv(DATA_PATH, label_col=LABEL_COLUMN)
@@ -120,12 +123,12 @@ async def client_main(addr: str, server_addr: str):
         trainer.save(MODEL_PATH)
 
         await asyncio.sleep(SLEEP_INTERVAL)
-        print(f"[NODE] Enviando modelo entrenado...")
+        logger.info(f"[NODE] Enviando modelo entrenado...")
         await send_file_identified(addr, server_addr, MODEL_PATH)
         await send_identified(addr, server_addr, json.dumps(metrics))
-        print(f"[NODE] Métricas enviadas: {metrics}")
+        logger.info(f"[NODE] Métricas enviadas: {metrics}")
 
-    print(f"\n[NODE] Entrenamiento federado completado.")
+    logger.info(f"\n[NODE] Entrenamiento federado completado.")
 
 
 def main(central: bool, addr: list, server_addr: str, childs: list[str]=None):

@@ -7,6 +7,9 @@ from connections.server import listener_ips, listener_server
 from config import LISTENER_DURATION, MODEL_PATH
 from utils import get_ipport
 from federated import main as fed
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 async def sharing(ip_father: str, ip: str, ips_children: list[str]):
     
@@ -17,38 +20,63 @@ async def sharing(ip_father: str, ip: str, ips_children: list[str]):
 
     if ip_father != ip:
         # Primero registrarse con el padre
-        print("[HIER] Enviando IP propia al padre...")
+        logger.info("[HIER] Enviando IP propia al padre...")
         await send(ip_father, ip)
 
-        print("[HIER] Escuchando IPs hijas...")
+        logger.info("[HIER] Escuchando IPs hijas...")
         ips = await listener_ips(local_listen_addr, LISTENER_DURATION)
-        print(f"[HIER] Hijos registrados: {ips}")
+        logger.info(f"[HIER] Hijos registrados: {ips}")
 
         # Esperar el modelo del padre
-        print("[HIER] Esperando modelo del padre...")
-
-        received = await listener_server(local_listen_addr, LISTENER_DURATION * 100, file_path=MODEL_PATH)
-        if received is None:
-            print("[HIER] No se recibió modelo. Abortando.")
-            return
+        await get_model(local_listen_addr, LISTENER_DURATION * 10)
 
     else:
         # Raíz: escucha hijos y distribuye
-        print("[HIER] Soy raíz. Escuchando IPs hijas...")
+        logger.info("[HIER] Soy raíz. Escuchando IPs hijas...")
         ips = await listener_ips(local_listen_addr, LISTENER_DURATION * 2)
-        print(f"[HIER] Hijos registrados: {ips}")
+        logger.info(f"[HIER] Hijos registrados: {ips}")
 
-    if ips:
-        print(f"[HIER] Distribuyendo modelo a {len(ips)} hijo(s)...")
-        time.sleep(2)
-        await send_file_to_nodes(ips, MODEL_PATH, delay=LISTENER_DURATION * 6)
-        # Se elimina el modelo de todos los nodos intermedios
-        os.remove(MODEL_PATH)
+    if len(ips):
+        await send_model(ips)
     else:
-        print("[HIER] Soy nodo hoja, sin hijos. Distribución completada.")
+        logger.info("[HIER] Soy nodo hoja, sin hijos. Distribución completada.")
 
     for ip in ips:
-        ips_children.append(ip)
+        ips_children.append(ip) 
+
+
+
+
+
+async def get_model(local_listen_addr: str, delay: int = LISTENER_DURATION):
+    logger.info("[HIER] Esperando modelo del padre...")
+
+    received = await listener_server(local_listen_addr, delay, file_path=MODEL_PATH)
+    if received is None:
+        logger.error("[HIER] No se recibió modelo. Abortando.")
+        return
+    
+async def send_model(ips_children: list[str]):
+    logger.info(f"[HIER] Distribuyendo modelo a {len(ips_children)} hijo(s)...")
+    await send_file_to_nodes(ips_children, MODEL_PATH, delay=LISTENER_DURATION * 6)
+    #Se elimina el modelo de todos los nodos intermedios
+    os.remove(MODEL_PATH)
+    
+async def distribute_model(ips_children: list[str], ip_father: str, ip: str):
+    _, listen_port = get_ipport(ip)
+    # Usamos 0.0.0.0 para que escuche en todas las tarjetas de red (Docker o Raspberrys)
+    local_listen_addr = f"0.0.0.0:{listen_port}"
+
+    if len(ips_children) and (ip_father == ip):
+        await send_model(ips_children)
+
+    elif len(ips_children):
+        await get_model(local_listen_addr, LISTENER_DURATION * 10)
+        await send_model(ips_children)
+
+    else:
+        logger.info("[HIER] Soy nodo hoja, sin hijos. Distribución completada.")
+
 
 
 def main():
@@ -60,15 +88,25 @@ def main():
 
     leaf = len(ips) == 0
 
-    if leaf:
-        fed(central=False, addr=ip, server_addr=ip_father)
-    elif (not leaf) and (ip_father == ip):
-        fed(central=True, addr=ip, server_addr=ip, childs=ips)
-    else:
-        fed(central=True, addr=ip, server_addr=ip_father, childs=ips)
-        fed(central=False, addr=ip, server_addr=ip_father)
-        
+    N_ROUNDS = 1
 
+    for round in range(N_ROUNDS):
+        logger.info(f"[HIER] Ronda jerárquica número {round}")
+
+        if leaf:
+            fed(central=False, addr=ip, server_addr=ip_father)
+        elif (not leaf) and (ip_father == ip):
+            fed(central=True, addr=ip, server_addr=ip, childs=ips)
+        else:
+            fed(central=True, addr=ip, server_addr=ip_father, childs=ips)
+            fed(central=False, addr=ip, server_addr=ip_father)
+        
+        if round < (N_ROUNDS - 1):
+            asyncio.run(distribute_model(ips, ip_father, ip))
+        
+        logger.info(f"[HIER] Ronda jerárquica número {round} terminada")
+
+    logger.info(f"[HIER] Proceso jerárquico terminado")
 
 if __name__ == "__main__":
     main()

@@ -2,6 +2,9 @@ import json
 import csv
 import os
 from config import NODES_JSON, METRICS_CSV, RECEIVED_MODEL_FILENAME
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 def get_ipport(addr: str) -> tuple[str, int]:
     """
@@ -20,7 +23,7 @@ def save_nodes(ips: list[str], path: str = NODES_JSON) -> dict[str, str]:
     nodes["n_nodes"] = len(ips)
     with open(path, "w") as f:
         json.dump(nodes, f, indent=2)
-    print(f"[CENTRAL] Nodos guardados en {path}: {nodes}")
+    logger.info(f"[CENTRAL] Nodos guardados en {path}: {nodes}")
     return nodes
 
 
@@ -46,7 +49,7 @@ def append_metrics(metrics_list: list[dict], round_n: int, path: str = METRICS_C
             writer.writeheader()
         for entry in metrics_list:
             writer.writerow({"round": round_n, **entry})
-    print(f"[CENTRAL] Métricas de ronda {round_n} guardadas en {path}")
+    logger.info(f"[CENTRAL] Métricas de ronda {round_n} guardadas en {path}")
 
 
 async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL_FILENAME) -> str:
@@ -58,5 +61,5 @@ async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL
     filepath = os.path.join(save_path, filename)
     with open(filepath, "wb") as f:
         f.write(data)
-    print(f"[FILE SAVED] {filepath}")
+    logger.info(f"[FILE SAVED] {filepath}")
     return filepath

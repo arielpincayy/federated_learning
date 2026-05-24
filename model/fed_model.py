@@ -8,6 +8,9 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import precision_score, recall_score, f1_score
 
 from config import TEST_SIZE, BATCH_SIZE, LABEL_COLUMN, RANDOM_STATE, EPOCHS
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class ModelTrainer:
@@ -17,15 +20,15 @@ class ModelTrainer:
         Salida: instancia lista para entrenar con los pesos cargados.
         """
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"[INIT] Utilizando dispositivo: {self.device.upper()}")
+        logger.info(f"[INIT] Utilizando dispositivo: {self.device.upper()}")
 
         self.model = model_architecture.to(self.device)
 
         try:
             self.model.load_state_dict(torch.load(model_path, map_location=self.device))
-            print(f"[INIT] Pesos cargados desde: {model_path}")
+            logger.info(f"[INIT] Pesos cargados desde: {model_path}")
         except Exception as e:
-            print(f"[WARNING] No se pudieron cargar los pesos: {e}. Se entrena desde cero.")
+            logger.warning(f"[WARNING] No se pudieron cargar los pesos: {e}. Se entrena desde cero.")
 
     def load_csv(self, path, label_col=LABEL_COLUMN, test_size=TEST_SIZE, batch_size=BATCH_SIZE):
         df = pd.read_csv(path)
@@ -42,8 +45,8 @@ class ModelTrainer:
         X = scaler.fit_transform(X).astype("float32")
         
         # 3. Debug rápido
-        print(f"[DATA] X: shape={X.shape}, nan={np.isnan(X).sum()}, max={X.max():.2f}")
-        print(f"[DATA] y: unique={np.unique(y)}")
+        logger.info(f"[DATA] X: shape={X.shape}, nan={np.isnan(X).sum()}, max={X.max():.2f}")
+        logger.info(f"[DATA] y: unique={np.unique(y)}")
         
         X_train, X_test, y_train, y_test = train_test_split(
             X, y, test_size=test_size, random_state=RANDOM_STATE
@@ -67,7 +70,7 @@ class ModelTrainer:
         Entrada: DataLoader de entrenamiento, función de pérdida, optimizador, número de épocas.
         Salida: tiempo total de entrenamiento en segundos.
         """
-        print(f"\n[TRAINING] Iniciando entrenamiento por {epochs} épocas...")
+        logger.info(f"\n[TRAINING] Iniciando entrenamiento por {epochs} épocas...")
         start = time.time()
         self.model.train()
 
@@ -83,10 +86,10 @@ class ModelTrainer:
                 running_loss += loss.item() * inputs.size(0)
 
             epoch_loss = running_loss / len(train_loader.dataset)
-            print(f" Época [{epoch+1}/{epochs}] Loss: {epoch_loss:.4f} | {time.time()-t0:.2f}s")
+            logger.info(f" Época [{epoch+1}/{epochs}] Loss: {epoch_loss:.4f} | {time.time()-t0:.2f}s")
 
         total = time.time() - start
-        print(f"[TRAINING] Completado en {total:.2f}s")
+        logger.info(f"[TRAINING] Completado en {total:.2f}s")
         return total
 
     @torch.no_grad()
@@ -95,7 +98,7 @@ class ModelTrainer:
         Entrada: DataLoader de test.
         Salida: dict con accuracy, precision, recall y f1_score.
         """
-        print("\n[EVAL] Evaluando modelo...")
+        logger.info("\n[EVAL] Evaluando modelo...")
         self.model.eval()
         all_preds, all_labels = [], []
 
@@ -116,15 +119,15 @@ class ModelTrainer:
 
     def _print_metrics(self, metrics: dict):
         """Entrada: dict de métricas. Salida: ninguna (imprime tabla)."""
-        print("-" * 35)
+        logger.info("-" * 35)
         for k, v in metrics.items():
-            print(f" {k.capitalize():<14} | {v:.4f}")
-        print("-" * 35)
+            logger.info(f" {k.capitalize():<14} | {v:.4f}")
+        logger.info("-" * 35)
 
     def save(self, output_path: str):
         """Entrada: ruta destino. Salida: ninguna (guarda state_dict del modelo)."""
         torch.save(self.model.state_dict(), output_path)
-        print(f"[SAVED] Modelo guardado en: {output_path}")
+        logger.info(f"[SAVED] Modelo guardado en: {output_path}")
 
 
 def federated_average(model_paths: list[str]) -> dict:

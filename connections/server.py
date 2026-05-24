@@ -5,6 +5,9 @@ import websockets
 
 from config import LISTENER_DURATION, RECEIVED_FILES_PATH, ACK_IDENTIFIED, ACK_REGISTERED, ACK_FILE_SUCCESS, ACK_MESSAGE_SUCCESS, SLEEP_INTERVAL
 from utils import get_ipport, _save_file
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str]:
@@ -16,8 +19,8 @@ async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str
     conexión reinicia el temporizador, esperando `duration` segundos adicionales.
     """
     host, port = get_ipport(addr)
-    print(f"[TEMP SERVER] Iniciando en ws://{host}:{port}...")
-    print(f"[TEMP SERVER] El servidor cerrará si pasan {duration}s sin nuevos nodos.")
+    logger.info(f"[TEMP SERVER] Iniciando en ws://{host}:{port}...")
+    logger.info(f"[TEMP SERVER] El servidor cerrará si pasan {duration}s sin nuevos nodos.")
 
     addrs = []
     # Inicializamos el marcador de tiempo al arrancar el servidor
@@ -33,9 +36,9 @@ async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str
                 
                 if message not in addrs:
                     addrs.append(message)
-                    print(f"[TEMP SERVER] Nodo registrado: {message}. Temporizador reiniciado (+{duration}s).")
+                    logger.info(f"[TEMP SERVER] Nodo registrado: {message}. Temporizador reiniciado (+{duration}s).")
                 else:
-                    print(f"[TEMP SERVER] Nodo {message} ya estaba registrado. Temporizador reiniciado (+{duration}s).")
+                    logger.info(f"[TEMP SERVER] Nodo {message} ya estaba registrado. Temporizador reiniciado (+{duration}s).")
                 
                 await websocket.send(ACK_REGISTERED)
         except websockets.exceptions.ConnectionClosed:
@@ -50,13 +53,13 @@ async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str
             
             tiempo_inactivo = time.time() - ultimo_registro_time
             if tiempo_inactivo >= duration:
-                print(f"[TEMP SERVER] Se alcanzó el límite de {duration}s de inactividad total. Cerrando...")
+                logger.info(f"[TEMP SERVER] Se alcanzó el límite de {duration}s de inactividad total. Cerrando...")
                 break
     finally:
         # Garantizamos el cierre correcto del servidor y la liberación del puerto
         server.close()
         await server.wait_closed()
-        print("[TEMP SERVER] Servidor temporal cerrado exitosamente.")
+        logger.info("[TEMP SERVER] Servidor temporal cerrado exitosamente.")
 
     return addrs
 
@@ -70,7 +73,7 @@ async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_pa
     """
     host, port = get_ipport(addr)
     n_expected = len(nodes)
-    print(f"[SERVER] Listening on ws://{host}:{port} "
+    logger.info(f"[SERVER] Listening on ws://{host}:{port} "
           f"(esperando {n_expected} nodo(s), max {delay}s)...")
 
     # Lookup por host (IP) ignorando puerto
@@ -84,17 +87,17 @@ async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_pa
         try:
             ident = await websocket.recv()
             if not isinstance(ident, str):
-                print(f"[SERVER] Identificación inválida ignorada: {ident!r}")
+                logger.error(f"[SERVER] Identificación inválida ignorada: {ident!r}")
                 return
 
             try:
                 ident_host, _ = get_ipport(ident)
             except Exception:
-                print(f"[SERVER] Identificación mal formada ignorada: {ident!r}")
+                logger.error(f"[SERVER] Identificación mal formada ignorada: {ident!r}")
                 return
 
             if ident_host not in nodes_by_host:
-                print(f"[SERVER] Host desconocido ignorado: {ident_host!r}")
+                logger.error(f"[SERVER] Host desconocido ignorado: {ident_host!r}")
                 return
 
             node_id = nodes_by_host[ident_host]
@@ -111,7 +114,7 @@ async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_pa
                     results[node_id].append(filepath)
                     await websocket.send(ACK_FILE_SUCCESS)
                 else:
-                    print(f"[SERVER] [{node_id}] str recibido: {message}")
+                    logger.info(f"[SERVER] [{node_id}] str recibido: {message}")
                     results[node_id].append(message)
                     await websocket.send(ACK_MESSAGE_SUCCESS)
 
@@ -119,7 +122,7 @@ async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_pa
                 has_metrics = any(isinstance(i, str) and not i.endswith(".pt") for i in results[node_id])
                 if has_model and has_metrics:
                     completed.add(node_id)
-                    print(f"[SERVER] [{node_id}] completado ({len(completed)}/{n_expected})")
+                    logger.info(f"[SERVER] [{node_id}] completado ({len(completed)}/{n_expected})")
                     if len(completed) >= n_expected:
                         done_event.set()
 
@@ -129,9 +132,9 @@ async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_pa
     async with websockets.serve(wrapper, host, port):
         try:
             await asyncio.wait_for(done_event.wait(), timeout=delay)
-            print(f"[SERVER] Todos los nodos completados.")
+            logger.info(f"[SERVER] Todos los nodos completados.")
         except asyncio.TimeoutError:
-            print(f"[SERVER] Timeout: {len(completed)}/{n_expected} nodos completados.")
+            logger.warning(f"[SERVER] Timeout: {len(completed)}/{n_expected} nodos completados.")
 
     return results
 
@@ -149,7 +152,7 @@ async def listener_server(
             o None si se agota el tiempo sin recibir nada.
     """
     host, port = get_ipport(listen_addr)
-    print(f"[NODE] Escuchando en ws://{host}:{port} esperando al servidor central (max {delay}s)...")
+    logger.info(f"[NODE] Escuchando en ws://{host}:{port} esperando al servidor central (max {delay}s)...")
 
     # Variables para capturar lo que recibamos y un evento para romper la espera
     result = None
@@ -169,20 +172,20 @@ async def listener_server(
                     os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
                     with open(file_path, "wb") as f:
                         f.write(message)
-                    print(f"[NODE] [FILE SAVED] {file_path}")
+                    logger.info(f"[NODE] [FILE SAVED] {file_path}")
                     await websocket.send("ACK_FILE_SUCCESS")
                     result = file_path
                 else:
-                    print("[NODE] Se recibieron bytes pero no se especificó file_path.")
+                    logger.warning("[NODE] Se recibieron bytes pero no se especificó file_path.")
                     await websocket.send("ACK_FILE_SUCCESS")
                     result = message  # Retorna los bytes crudos si no hay ruta
             else:
-                print(f"[NODE] Mensaje de texto recibido: {message}")
+                logger.info(f"[NODE] Mensaje de texto recibido: {message}")
                 await websocket.send("ACK_MESSAGE_SUCCESS")
                 result = message
 
         except Exception as e:
-            print(f"[NODE] Error procesando la conexión entrante: {e}")
+            logger.error(f"[NODE] Error procesando la conexión entrante: {e}")
         finally:
             # Ya sea con éxito o fallo, avisamos que podemos cerrar el servidor
             stop_event.set()
@@ -193,6 +196,6 @@ async def listener_server(
             # Esperamos a que ocurra el evento de recepción o que se agote el delay
             await asyncio.wait_for(stop_event.wait(), timeout=delay)
         except asyncio.TimeoutError:
-            print(f"[NODE] Tiempo agotado ({delay}s): El servidor central nunca se conectó.")
+            logger.warning(f"[NODE] Tiempo agotado ({delay}s): El servidor central nunca se conectó.")
 
     return result

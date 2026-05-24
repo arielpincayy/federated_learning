@@ -2,6 +2,9 @@ import asyncio
 import websockets
 from config import ACK_IDENTIFIED
 from utils import get_ipport
+from logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 async def send(server_addr: str, message: str):
@@ -12,7 +15,7 @@ async def send(server_addr: str, message: str):
     Intenta conectarse y enviar el mensaje hasta 3 veces antes de fallar.
     """
     if not isinstance(message, str):
-        print(f"[ERROR] send() espera str. Recibido: {type(message)}")
+        logger.error(f"[ERROR] send() espera str. Recibido: {type(message)}")
         return
 
     host, port = get_ipport(server_addr)
@@ -26,18 +29,18 @@ async def send(server_addr: str, message: str):
             async with websockets.connect(uri) as websocket:
                 await websocket.send(message)
                 response = await websocket.recv()
-                print(f"[SERVER RESPONSE] {response}")
+                logger.info(f"[SERVER RESPONSE] {response}")
                 return  # Éxito: salimos de la función inmediatamente
                 
         except Exception as e:
-            print(f"[ERROR EN SEND] Intento {intento}/{max_intentos} falló: {e}")
+            logger.error(f"[ERROR EN SEND] Intento {intento}/{max_intentos} falló: {e}")
             
             # Si aún nos quedan intentos, esperamos un momento antes de volver a probar
             if intento < max_intentos:
-                print(f"[SEND] Reintentando en {delay_entre_intentos} segundos...")
+                logger.info(f"[SEND] Reintentando en {delay_entre_intentos} segundos...")
                 await asyncio.sleep(delay_entre_intentos)
             else:
-                print(f"[CRITICAL] No se pudo conectar con {uri} tras {max_intentos} intentos.")
+                logger.critical(f"[CRITICAL] No se pudo conectar con {uri} tras {max_intentos} intentos.")
 
 async def send_identified(node_addr: str, server_addr: str, message: str | bytes):
     """
@@ -53,15 +56,15 @@ async def send_identified(node_addr: str, server_addr: str, message: str | bytes
             await websocket.send(node_addr)
             ack = await websocket.recv()
             if ack != ACK_IDENTIFIED:
-                print(f"[ERROR] Identificación rechazada: {ack}")
+                logger.error(f"[ERROR] Identificación rechazada: {ack}")
                 return
 
             # Payload
             await websocket.send(message)
             response = await websocket.recv()
-            print(f"[SERVER RESPONSE] {response}")
+            logger.info(f"[SERVER RESPONSE] {response}")
     except Exception as e:
-        print(f"[ERROR EN SEND_IDENTIFIED] {e}")
+        logger.error(f"[ERROR EN SEND_IDENTIFIED] {e}")
 
 
 async def send_file_identified(node_addr: str, server_addr: str, file_path: str):
@@ -74,10 +77,10 @@ async def send_file_identified(node_addr: str, server_addr: str, file_path: str)
         with open(file_path, "rb") as f:
             file_data = f.read()
     except FileNotFoundError:
-        print(f"[ERROR] Archivo no encontrado: {file_path}")
+        logger.error(f"[ERROR] Archivo no encontrado: {file_path}")
         return
     except Exception as e:
-        print(f"[ERROR AL LEER ARCHIVO] {e}")
+        logger.error(f"[ERROR AL LEER ARCHIVO] {e}")
         return
 
     host, port = get_ipport(server_addr)
@@ -88,16 +91,16 @@ async def send_file_identified(node_addr: str, server_addr: str, file_path: str)
             await websocket.send(node_addr)
             ack = await websocket.recv()
             if ack != ACK_IDENTIFIED:
-                print(f"[ERROR] Identificación rechazada: {ack}")
+                logger.error(f"[ERROR] Identificación rechazada: {ack}")
                 return
 
             # Archivo
-            print(f"[CLIENT] Transmitiendo '{file_path}' ({len(file_data)} bytes)...")
+            logger.info(f"[CLIENT] Transmitiendo '{file_path}' ({len(file_data)} bytes)...")
             await websocket.send(file_data)
             response = await websocket.recv()
-            print(f"[SERVER RESPONSE] {response}")
+            logger.info(f"[SERVER RESPONSE] {response}")
     except Exception as e:
-        print(f"[ERROR EN SEND_FILE_IDENTIFIED] {e}")
+        logger.error(f"[ERROR EN SEND_FILE_IDENTIFIED] {e}")
 
 
 async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float):
@@ -106,7 +109,7 @@ async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float)
              ruta del archivo a enviar, tiempo máximo de espera global en segundos.
     Salida: ninguna (conecta a cada nodo y le envía el archivo en paralelo).
     """
-    print(f"[SERVER] Iniciando distribución de archivo {filepath} a {len(node_addrs)} nodo(s)...")
+    logger.info(f"[SERVER] Iniciando distribución de archivo {filepath} a {len(node_addrs)} nodo(s)...")
 
     # Leemos el archivo en memoria una sola vez para optimizar
     with open(filepath, "rb") as f:
@@ -118,10 +121,10 @@ async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float)
             async with websockets.connect(f"ws://{addr}") as websocket:
                 await websocket.send(data)
                 response = await websocket.recv()
-                print(f"[SERVER] Confirmación desde {addr}: {response}")
+                logger.info(f"[SERVER] Confirmación desde {addr}: {response}")
                 return True
         except (websockets.exceptions.ConnectionClosed, OSError, asyncio.TimeoutError):
-            print(f"[SERVER] Error o timeout al intentar conectar con el nodo {addr}")
+            logger.error(f"[SERVER] Error o timeout al intentar conectar con el nodo {addr}")
             return False
 
     # Creamos las tareas para disparar los envíos de forma simultánea
@@ -132,11 +135,11 @@ async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float)
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=delay)
         served = sum(1 for r in results if r is True)
     except asyncio.TimeoutError:
-        print("[SERVER] Timeout global alcanzado. Algunas conexiones quedaron incompletas.")
+        logger.warning("[SERVER] Timeout global alcanzado. Algunas conexiones quedaron incompletas.")
         # Intentamos recuperar los resultados completados si gather ya había guardado algunos
         served = "Incompleto (Timeout)"
 
-    print(f"[SERVER] Archivo entregado con éxito a {served}/{len(node_addrs)} nodo(s).")
+    logger.info(f"[SERVER] Archivo entregado con éxito a {served}/{len(node_addrs)} nodo(s).")
 
 
 async def send_message_to_nodes(node_addrs: list[str], message: str, delay: float):
@@ -145,7 +148,7 @@ async def send_message_to_nodes(node_addrs: list[str], message: str, delay: floa
              mensaje (str) a enviar, tiempo máximo de espera global en segundos.
     Salida: ninguna (conecta a cada nodo y le envía el mensaje en paralelo).
     """
-    print(f"[SERVER] Iniciando distribución de mensaje a {len(node_addrs)} nodo(s)...")
+    logger.info(f"[SERVER] Iniciando distribución de mensaje a {len(node_addrs)} nodo(s)...")
 
     async def send_to_single_node(addr: str):
         try:
@@ -153,10 +156,10 @@ async def send_message_to_nodes(node_addrs: list[str], message: str, delay: floa
             async with websockets.connect(f"ws://{addr}") as websocket:
                 await websocket.send(message)
                 response = await websocket.recv()
-                print(f"[SERVER] Confirmación desde {addr}: {response}")
+                logger.info(f"[SERVER] Confirmación desde {addr}: {response}")
                 return True
         except (websockets.exceptions.ConnectionClosed, OSError, asyncio.TimeoutError):
-            print(f"[SERVER] Error o timeout al intentar conectar con el nodo {addr}")
+            logger.error(f"[SERVER] Error o timeout al intentar conectar con el nodo {addr}")
             return False
 
     # Creamos las tareas para todos los nodos
@@ -167,7 +170,7 @@ async def send_message_to_nodes(node_addrs: list[str], message: str, delay: floa
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=delay)
         served = sum(1 for r in results if r is True)
     except asyncio.TimeoutError:
-        print("[SERVER] Timeout global alcanzado. Algunas conexiones quedaron incompletas.")
+        logger.warning("[SERVER] Timeout global alcanzado. Algunas conexiones quedaron incompletas.")
         served = "Incompleto (Timeout)"
 
-    print(f"[SERVER] Mensaje entregado con éxito a {served}/{len(node_addrs)} nodo(s).")
+    logger.info(f"[SERVER] Mensaje entregado con éxito a {served}/{len(node_addrs)} nodo(s).")
