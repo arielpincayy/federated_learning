@@ -71,10 +71,11 @@ async def distribute_model(ips_children: list[str], ip_father: str, ip: str):
         await send_model(ips_children)
 
     elif len(ips_children):
-        await get_model(local_listen_addr, LISTENER_DURATION * 10)
+        await get_model(local_listen_addr, LISTENER_DURATION * 100)
         await send_model(ips_children)
 
     else:
+        await get_model(local_listen_addr, LISTENER_DURATION * 100)
         logger.info("[HIER] Soy nodo hoja, sin hijos. Distribución completada.")
 
 
@@ -88,7 +89,7 @@ def main():
 
     leaf = len(ips) == 0
 
-    N_ROUNDS = 1
+    N_ROUNDS = 5
 
     for round in range(N_ROUNDS):
         logger.info(f"[HIER] Ronda jerárquica número {round}")
