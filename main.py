@@ -4,7 +4,7 @@ import sys
 import time
 from connections.client import send, send_file_to_nodes
 from connections.server import listener_ips, listener_server
-from config import LISTENER_DURATION, MODEL_PATH, IN_FEATURES
+from config import H_ROUNDS, LISTENER_DURATION, MODEL_PATH, IN_FEATURES
 from utils import get_ipport
 from federated import main as fed
 from logging_config import get_logger
@@ -95,9 +95,7 @@ def main():
 
     leaf = len(ips) == 0
 
-    N_ROUNDS = 5
-
-    for round in range(N_ROUNDS):
+    for round in range(H_ROUNDS):
         logger.info(f"[HIER] Ronda jerárquica número {round}")
 
         if leaf:
@@ -108,7 +106,7 @@ def main():
             fed(central=True, addr=ip, server_addr=ip_father, childs=ips)
             fed(central=False, addr=ip, server_addr=ip_father)
         
-        if round < (N_ROUNDS - 1):
+        if round < (H_ROUNDS - 1):
             asyncio.run(distribute_model(ips, ip_father, ip))
         
         logger.info(f"[HIER] Ronda jerárquica número {round} terminada")
