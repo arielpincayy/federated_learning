@@ -4,10 +4,11 @@ import sys
 import time
 from connections.client import send, send_file_to_nodes
 from connections.server import listener_ips, listener_server
-from config import LISTENER_DURATION, MODEL_PATH
+from config import LISTENER_DURATION, MODEL_PATH, IN_FEATURES
 from utils import get_ipport
 from federated import main as fed
 from logging_config import get_logger
+from model.create_model import create_model
 
 logger = get_logger(__name__)
 
@@ -17,6 +18,11 @@ async def sharing(ip_father: str, ip: str, ips_children: list[str]):
     _, listen_port = get_ipport(ip)
     # Usamos 0.0.0.0 para que escuche en todas las tarjetas de red (Docker o Raspberrys)
     local_listen_addr = f"0.0.0.0:{listen_port}"
+
+    if ip_father == ip:
+        logger.info("[CENTRAL HIER] Creando modelo")
+        create_model(in_features=IN_FEATURES, path=MODEL_PATH)
+        logger.info("[CENTRAL HIER] Modelo creado")
 
     if ip_father != ip:
         # Primero registrarse con el padre
