@@ -28,6 +28,11 @@ async def central_main(addr: str, ips: list[str]):
     #await send_message_to_nodes(node_addrs=ips, message="start", delay=LISTENER_DURATION)
     #print("[CENTRAL] Mensaje START enviado")
 
+    # Extraemos el puerto en el que este nodo específico debe escuchar
+    _, listen_port = get_ipport(addr)
+    # Usamos 0.0.0.0 para que escuche en todas las tarjetas de red (Docker o Raspberrys)
+    local_listen_addr = f"0.0.0.0:{listen_port}"
+
     for round_n in range(1, ROUNDS + 1):
         print(f"\n[CENTRAL] ══ Ronda {round_n}/{ROUNDS} ══")
 
@@ -40,7 +45,7 @@ async def central_main(addr: str, ips: list[str]):
         round_dir = f"round_{round_n}"
         os.makedirs(round_dir, exist_ok=True)
         results = await listener_nodes(
-            addr,
+            local_listen_addr,
             nodes=nodes_by_addr,
             delay=NODES_LISTENER_DELAY * 100,
             save_path=round_dir,

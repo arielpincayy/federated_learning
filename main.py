@@ -11,22 +11,23 @@ from federated import main as fed
 async def sharing(ip_father: str, ip: str, ips_children: list[str]):
     
     ips = []
+    _, listen_port = get_ipport(ip)
+    # Usamos 0.0.0.0 para que escuche en todas las tarjetas de red (Docker o Raspberrys)
+    local_listen_addr = f"0.0.0.0:{listen_port}"
+
     if ip_father != ip:
         # Primero registrarse con el padre
         print("[HIER] Enviando IP propia al padre...")
         await send(ip_father, ip)
 
         print("[HIER] Escuchando IPs hijas...")
-        ips = await listener_ips(ip, LISTENER_DURATION)
+        ips = await listener_ips(local_listen_addr, LISTENER_DURATION)
         print(f"[HIER] Hijos registrados: {ips}")
 
         # Esperar el modelo del padre
         print("[HIER] Esperando modelo del padre...")
-        _, listen_port = get_ipport(ip)
-        # Usamos 0.0.0.0 para que escuche en todas las tarjetas de red (Docker o Raspberrys)
-        local_listen_addr = f"0.0.0.0:{listen_port}"
 
-        received = await listener_server(ip, LISTENER_DURATION * 100, file_path=MODEL_PATH)
+        received = await listener_server(local_listen_addr, LISTENER_DURATION * 100, file_path=MODEL_PATH)
         if received is None:
             print("[HIER] No se recibió modelo. Abortando.")
             return
@@ -34,7 +35,7 @@ async def sharing(ip_father: str, ip: str, ips_children: list[str]):
     else:
         # Raíz: escucha hijos y distribuye
         print("[HIER] Soy raíz. Escuchando IPs hijas...")
-        ips = await listener_ips(ip, LISTENER_DURATION * 2)
+        ips = await listener_ips(local_listen_addr, LISTENER_DURATION * 2)
         print(f"[HIER] Hijos registrados: {ips}")
 
     if ips:
