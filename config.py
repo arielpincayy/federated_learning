@@ -28,7 +28,7 @@ MLPLRG_HIDDEN3 = 64
 # ── Configuración de datos ────────────────────────────────────────────
 TEST_SIZE = 0.2
 BATCH_SIZE = 32
-LABEL_COLUMN = "label"
+LABEL_COLUMN = "is_premature_ncd"
 RANDOM_STATE = 42
 
 # ── Configuración de comunicación ─────────────────────────────────────

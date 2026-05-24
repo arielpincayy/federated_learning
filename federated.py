@@ -7,7 +7,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 
-from config import ROUNDS, EPOCHS, LEARNING_RATE, IN_FEATURES, LISTENER_DURATION, NODES_JSON, METRICS_CSV, MODEL_PATH, DATA_PATH, SLEEP_INTERVAL, POST_ROUND_DELAY, NODES_LISTENER_DELAY
+from config import ROUNDS, EPOCHS, LEARNING_RATE, IN_FEATURES, LISTENER_DURATION, NODES_JSON, METRICS_CSV, MODEL_PATH, DATA_PATH, SLEEP_INTERVAL, POST_ROUND_DELAY, NODES_LISTENER_DELAY, LABEL_COLUMN
 from connections.client import send_identified, send_file_identified, send_file_to_nodes, send_message_to_nodes, send
 from connections.server import listener_nodes, listener_server
 from model.create_model import MLP
@@ -107,7 +107,7 @@ async def client_main(addr: str, server_addr: str):
         print(f"[NODE] Entrenando con {DATA_PATH} por {EPOCHS} épocas...")
         architecture = MLP(in_features=IN_FEATURES)
         trainer = ModelTrainer(model_path=MODEL_PATH, model_architecture=architecture)
-        train_loader, test_loader = trainer.load_csv(DATA_PATH, label_col="is_premature_ncd")
+        train_loader, test_loader = trainer.load_csv(DATA_PATH, label_col=LABEL_COLUMN)
         criterion = nn.BCEWithLogitsLoss()
         optimizer = optim.Adam(architecture.parameters(), lr=LEARNING_RATE)
         trainer.fit(train_loader, criterion, optimizer, epochs=EPOCHS)
