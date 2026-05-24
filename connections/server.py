@@ -12,38 +12,51 @@ async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str
     Entrada: dirección del servidor (host:port), duración máxima de inactividad en segundos.
     Salida: lista de direcciones únicas (host:port) registradas por los clientes.
 
-    Cierra automáticamente tras `duration` segundos sin nuevos registros.
+    Cierra automáticamente tras `duration` segundos de inactividad. Cada nueva 
+    conexión reinicia el temporizador, esperando `duration` segundos adicionales.
     """
     host, port = get_ipport(addr)
     print(f"[TEMP SERVER] Iniciando en ws://{host}:{port}...")
-    print(f"[TEMP SERVER] El servidor cerrará tras {duration}s de inactividad desde el último nodo.")
+    print(f"[TEMP SERVER] El servidor cerrará si pasan {duration}s sin nuevos nodos.")
 
     addrs = []
+    # Inicializamos el marcador de tiempo al arrancar el servidor
     ultimo_registro_time = time.time()
 
     async def wrapper(websocket):
         nonlocal ultimo_registro_time
         try:
             message = await websocket.recv()
-            if isinstance(message, str) and message not in addrs:
-                addrs.append(message)
-                print(f"[TEMP SERVER] Nodo registrado: {message}")
+            if isinstance(message, str):
+                # Actualizamos el timestamp inmediatamente al recibir la señal
                 ultimo_registro_time = time.time()
+                
+                if message not in addrs:
+                    addrs.append(message)
+                    print(f"[TEMP SERVER] Nodo registrado: {message}. Temporizador reiniciado (+{duration}s).")
+                else:
+                    print(f"[TEMP SERVER] Nodo {message} ya estaba registrado. Temporizador reiniciado (+{duration}s).")
+                
                 await websocket.send(ACK_REGISTERED)
         except websockets.exceptions.ConnectionClosed:
             pass
 
+    # Iniciamos el servidor de websockets
     server = await websockets.serve(wrapper, host, port)
+    
     try:
         while True:
-            await asyncio.sleep(SLEEP_INTERVAL)
-            if time.time() - ultimo_registro_time >= duration:
-                print(f"[TEMP SERVER] Se alcanzó el límite de {duration}s sin nuevas conexiones.")
+            await asyncio.sleep(0.5)  # Ajusta este intervalo según tu SLEEP_INTERVAL
+            
+            tiempo_inactivo = time.time() - ultimo_registro_time
+            if tiempo_inactivo >= duration:
+                print(f"[TEMP SERVER] Se alcanzó el límite de {duration}s de inactividad total. Cerrando...")
                 break
     finally:
+        # Garantizamos el cierre correcto del servidor y la liberación del puerto
         server.close()
         await server.wait_closed()
-        print("[TEMP SERVER] Closed")
+        print("[TEMP SERVER] Servidor temporal cerrado exitosamente.")
 
     return addrs
 

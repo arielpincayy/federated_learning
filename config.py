@@ -6,7 +6,7 @@ Configuración centralizada para el sistema de aprendizaje federado.
 ROUNDS = 3
 EPOCHS = 5
 LEARNING_RATE = 1e-3
-IN_FEATURES = 20
+IN_FEATURES = 79
 
 # ── Rutas de archivos ──────────────────────────────────────────────────
 NODES_JSON = "nodes.json"

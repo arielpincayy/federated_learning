@@ -8,6 +8,8 @@ async def send(server_addr: str, message: str):
     """
     Entrada: dirección del servidor (host:port), mensaje de texto a enviar.
     Salida: ninguna (imprime respuesta del servidor o error).
+    
+    Intenta conectarse y enviar el mensaje hasta 3 veces antes de fallar.
     """
     if not isinstance(message, str):
         print(f"[ERROR] send() espera str. Recibido: {type(message)}")
@@ -15,14 +17,27 @@ async def send(server_addr: str, message: str):
 
     host, port = get_ipport(server_addr)
     uri = f"ws://{host}:{port}"
-    try:
-        async with websockets.connect(uri) as websocket:
-            await websocket.send(message)
-            response = await websocket.recv()
-            print(f"[SERVER RESPONSE] {response}")
-    except Exception as e:
-        print(f"[ERROR EN SEND] {e}")
+    
+    max_intentos = 3
+    delay_entre_intentos = 2  # Segundos a esperar antes de reintentar
 
+    for intento in range(1, max_intentos + 1):
+        try:
+            async with websockets.connect(uri) as websocket:
+                await websocket.send(message)
+                response = await websocket.recv()
+                print(f"[SERVER RESPONSE] {response}")
+                return  # Éxito: salimos de la función inmediatamente
+                
+        except Exception as e:
+            print(f"[ERROR EN SEND] Intento {intento}/{max_intentos} falló: {e}")
+            
+            # Si aún nos quedan intentos, esperamos un momento antes de volver a probar
+            if intento < max_intentos:
+                print(f"[SEND] Reintentando en {delay_entre_intentos} segundos...")
+                await asyncio.sleep(delay_entre_intentos)
+            else:
+                print(f"[CRITICAL] No se pudo conectar con {uri} tras {max_intentos} intentos.")
 
 async def send_identified(node_addr: str, server_addr: str, message: str | bytes):
     """
