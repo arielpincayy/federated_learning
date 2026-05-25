@@ -3,11 +3,11 @@ Configuración centralizada para el sistema de aprendizaje federado.
 """
 
 # ── Hiperparámetros de entrenamiento ───────────────────────────────────
-ROUNDS = 3
+ROUNDS = 10
 EPOCHS = 5
 LEARNING_RATE = 1e-3
 IN_FEATURES = 79
-H_ROUNDS = 5
+H_ROUNDS = 3
 
 # ── Rutas de archivos ──────────────────────────────────────────────────
 NODES_JSON = "nodes.json"
@@ -33,7 +33,7 @@ LABEL_COLUMN = "is_premature_ncd"
 RANDOM_STATE = 42
 
 # ── Configuración de comunicación ─────────────────────────────────────
-LISTENER_DURATION = 10
+LISTENER_DURATION = 20
 RECEIVED_MODEL_FILENAME = "received_model.pt"
 ACK_IDENTIFIED = "Identified"
 ACK_REGISTERED = "Registered"

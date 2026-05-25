@@ -96,7 +96,9 @@ def main():
     leaf = len(ips) == 0
 
     for round in range(H_ROUNDS):
-        logger.info(f"[HIER] Ronda jerárquica número {round}")
+        logger.info("========================================================================")
+        logger.info(f"=============[HIER] Ronda jerárquica número {round}=====================")
+        logger.info("========================================================================")
 
         if leaf:
             fed(central=False, addr=ip, server_addr=ip_father)

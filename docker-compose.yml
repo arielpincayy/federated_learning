@@ -3,7 +3,7 @@ services:
   # NIVEL 0: RAIZ DEL ÁRBOL
   # =========================================================================
   central:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_central
     command: ["python", "main.py", "0.0.0.0:8765", "0.0.0.0:8765"]
@@ -16,7 +16,7 @@ services:
   # NIVEL 1: NODOS INTERMEDIARIOS (Se conectan a 'central')
   # =========================================================================
   node1:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node1
     command: ["python", "main.py", "node1:8766", "central:8765"]
@@ -28,7 +28,7 @@ services:
       - PYTHONUNBUFFERED=1
 
   node2:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node2
     command: ["python", "main.py", "node2:8767", "central:8765"]
@@ -43,7 +43,7 @@ services:
   # NIVEL 2: NUEVOS NODOS HOJA (Se conectan a los nodos del Nivel 1)
   # =========================================================================
   node3:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node3
     command: ["python", "main.py", "node3:8768", "node1:8766"]
@@ -55,7 +55,7 @@ services:
       - PYTHONUNBUFFERED=1
 
   node4:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node4
     # Se conecta a node1 (8766)
@@ -68,7 +68,7 @@ services:
       - PYTHONUNBUFFERED=1
 
   node5:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node5
     # Se conecta a node1 (8766) para balancear la carga de ese subárbol
@@ -81,7 +81,7 @@ services:
       - PYTHONUNBUFFERED=1
 
   node6:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node6
     # Se conecta a node2 (8767)
@@ -94,7 +94,7 @@ services:
       - PYTHONUNBUFFERED=1
 
   node7:
-    image: federared-system_image:latest
+    image: federated-system_image:latest
     build: .
     container_name: federated_node7
     # Se conecta a node3 (8768)

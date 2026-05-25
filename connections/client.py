@@ -3,6 +3,7 @@ import websockets
 from config import ACK_IDENTIFIED
 from utils import get_ipport
 from logging_config import get_logger
+from network_metrics import NetworkMetricsContext
 
 logger = get_logger(__name__)
 
@@ -71,43 +72,50 @@ async def send_file_identified(node_addr: str, server_addr: str, file_path: str)
     """
     Entrada: addr propio del nodo (host:port) usado como identificación,
              dirección del servidor (host:port), ruta del archivo a enviar.
-    Salida: ninguna (envía identificación, luego el archivo como bytes).
+    Salida: tupla (éxito: bool, métricas_red: dict) con métricas de transmisión de red.
     """
     try:
         with open(file_path, "rb") as f:
             file_data = f.read()
     except FileNotFoundError:
         logger.error(f"[ERROR] Archivo no encontrado: {file_path}")
-        return
+        return False, {}
     except Exception as e:
         logger.error(f"[ERROR AL LEER ARCHIVO] {e}")
-        return
+        return False, {}
 
     host, port = get_ipport(server_addr)
     uri = f"ws://{host}:{port}"
+    
+    net_metrics = {}
     try:
-        async with websockets.connect(uri) as websocket:
-            # Identificación
-            await websocket.send(node_addr)
-            ack = await websocket.recv()
-            if ack != ACK_IDENTIFIED:
-                logger.error(f"[ERROR] Identificación rechazada: {ack}")
-                return
+        with NetworkMetricsContext() as metrics:
+            async with websockets.connect(uri) as websocket:
+                # Identificación
+                await websocket.send(node_addr)
+                ack = await websocket.recv()
+                if ack != ACK_IDENTIFIED:
+                    logger.error(f"[ERROR] Identificación rechazada: {ack}")
+                    return False, metrics.end_monitoring()
 
-            # Archivo
-            logger.info(f"[CLIENT] Transmitiendo '{file_path}' ({len(file_data)} bytes)...")
-            await websocket.send(file_data)
-            response = await websocket.recv()
-            logger.info(f"[SERVER RESPONSE] {response}")
+                # Archivo
+                logger.info(f"[CLIENT] Transmitiendo '{file_path}' ({len(file_data)} bytes)...")
+                metrics.set_model_bytes_transferred(bytes_tx=len(file_data))
+                await websocket.send(file_data)
+                response = await websocket.recv()
+                logger.info(f"[SERVER RESPONSE] {response}")
+                net_metrics = metrics.end_monitoring()
+                return True, net_metrics
     except Exception as e:
         logger.error(f"[ERROR EN SEND_FILE_IDENTIFIED] {e}")
+        return False, net_metrics
 
 
 async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float):
     """
     Entrada: lista de direcciones de los nodos (['ip1:port1', 'ip2:port2'...]), 
              ruta del archivo a enviar, tiempo máximo de espera global en segundos.
-    Salida: ninguna (conecta a cada nodo y le envía el archivo en paralelo).
+    Salida: tupla (resultados: dict de {addr -> bool}, métricas_red: dict por nodo)
     """
     logger.info(f"[SERVER] Iniciando distribución de archivo {filepath} a {len(node_addrs)} nodo(s)...")
 
@@ -115,16 +123,22 @@ async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float)
     with open(filepath, "rb") as f:
         data = f.read()
 
+    node_metrics = {}  # {addr -> métricas_red}
+    
     async def send_to_single_node(addr: str):
         try:
-            # Nos conectamos activamente al nodo receptor
-            async with websockets.connect(f"ws://{addr}") as websocket:
-                await websocket.send(data)
-                response = await websocket.recv()
-                logger.info(f"[SERVER] Confirmación desde {addr}: {response}")
-                return True
+            with NetworkMetricsContext() as metrics:
+                # Nos conectamos activamente al nodo receptor
+                async with websockets.connect(f"ws://{addr}") as websocket:
+                    metrics.set_model_bytes_transferred(bytes_rx=len(data))
+                    await websocket.send(data)
+                    response = await websocket.recv()
+                    logger.info(f"[SERVER] Confirmación desde {addr}: {response}")
+                    node_metrics[addr] = metrics.end_monitoring()
+                    return True
         except (websockets.exceptions.ConnectionClosed, OSError, asyncio.TimeoutError):
             logger.error(f"[SERVER] Error o timeout al intentar conectar con el nodo {addr}")
+            node_metrics[addr] = {}
             return False
 
     # Creamos las tareas para disparar los envíos de forma simultánea
@@ -136,10 +150,10 @@ async def send_file_to_nodes(node_addrs: list[str], filepath: str, delay: float)
         served = sum(1 for r in results if r is True)
     except asyncio.TimeoutError:
         logger.warning("[SERVER] Timeout global alcanzado. Algunas conexiones quedaron incompletas.")
-        # Intentamos recuperar los resultados completados si gather ya había guardado algunos
         served = "Incompleto (Timeout)"
 
     logger.info(f"[SERVER] Archivo entregado con éxito a {served}/{len(node_addrs)} nodo(s).")
+    return node_metrics
 
 
 async def send_message_to_nodes(node_addrs: list[str], message: str, delay: float):

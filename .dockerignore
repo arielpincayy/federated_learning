@@ -11,3 +11,6 @@ logs/
 Dockerfile
 docker-compose.yml
 *.log
+*.md
+*.gitignore
+data/

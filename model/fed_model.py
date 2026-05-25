@@ -59,13 +59,7 @@ class ModelTrainer:
         )
         return to_loader(X_train, y_train), to_loader(X_test, y_test)
 
-    def fit(
-        self,
-        train_loader: DataLoader,
-        criterion: nn.Module,
-        optimizer: torch.optim.Optimizer,
-        epochs: int = EPOCHS,
-    ) -> float:
+    def fit(self, train_loader: DataLoader, criterion: nn.Module, optimizer: torch.optim.Optimizer, epochs: int = EPOCHS) -> tuple[float, float]:
         """
         Entrada: DataLoader de entrenamiento, función de pérdida, optimizador, número de épocas.
         Salida: tiempo total de entrenamiento en segundos.
@@ -73,7 +67,8 @@ class ModelTrainer:
         logger.info(f"\n[TRAINING] Iniciando entrenamiento por {epochs} épocas...")
         start = time.time()
         self.model.train()
-
+        
+        loss = 0
         for epoch in range(epochs):
             running_loss = 0.0
             t0 = time.time()
@@ -86,11 +81,12 @@ class ModelTrainer:
                 running_loss += loss.item() * inputs.size(0)
 
             epoch_loss = running_loss / len(train_loader.dataset)
+            loss = epoch_loss
             logger.info(f" Época [{epoch+1}/{epochs}] Loss: {epoch_loss:.4f} | {time.time()-t0:.2f}s")
 
         total = time.time() - start
         logger.info(f"[TRAINING] Completado en {total:.2f}s")
-        return total
+        return total, loss
 
     @torch.no_grad()
     def evaluate(self, test_loader: DataLoader) -> dict:
