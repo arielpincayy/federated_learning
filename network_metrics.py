@@ -49,7 +49,7 @@ class NetworkMetricsCollector:
         """Obtiene estadísticas de la interfaz de red actual."""
         try:
             stats = psutil.net_if_stats()
-            io_counters = psutil.net_if_io_counters(pernic=True)
+            io_counters = psutil.net_io_counters()(pernic=True)
             
             if self.interface not in io_counters:
                 logger.warning(f"Interfaz {self.interface} no encontrada. Usando la primera disponible.")
@@ -175,6 +175,35 @@ class NetworkMetricsCollector:
             "net_bandwidth_rx_kbps": 0,
             "net_throughput_kbps": 0,
             "net_transmission_time_s": 0,
+        }
+
+
+def collect_system_metrics() -> dict:
+    """Recopila métricas del sistema del nodo.
+
+    Devuelve:
+        cpu_percent, ram_percent, cpu_freq_mhz y open_sockets.
+    """
+    try:
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        ram_percent = psutil.virtual_memory().percent
+        cpu_freq = psutil.cpu_freq()
+        cpu_freq_mhz = round(cpu_freq.current, 2) if cpu_freq else 0.0
+        open_sockets = len(psutil.net_connections(kind="inet"))
+
+        return {
+            "cpu_percent": round(cpu_percent, 2),
+            "ram_percent": round(ram_percent, 2),
+            "cpu_freq_mhz": cpu_freq_mhz,
+            "open_sockets": open_sockets,
+        }
+    except Exception as e:
+        logger.error(f"Error al recopilar métricas del sistema: {e}")
+        return {
+            "cpu_percent": 0.0,
+            "ram_percent": 0.0,
+            "cpu_freq_mhz": 0.0,
+            "open_sockets": 0,
         }
 
 

@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 
 from config import TEST_SIZE, BATCH_SIZE, LABEL_COLUMN, RANDOM_STATE, EPOCHS
 from logging_config import get_logger
@@ -104,11 +104,25 @@ class ModelTrainer:
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.squeeze(1).long().numpy())
 
+        accuracy = sum(p == l for p, l in zip(all_preds, all_labels)) / len(all_labels)
+        precision = precision_score(all_labels, all_preds, average="macro", zero_division=0)
+        recall = recall_score(all_labels, all_preds, average="macro", zero_division=0)
+        f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0)
+        specificity, sensitivity = 0.0, 0.0
+        try:
+            tn, fp, fn, tp = confusion_matrix(all_labels, all_preds, labels=[0, 1]).ravel()
+            specificity = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+            sensitivity = tp / (tp + fn) if (tp + fn) > 0 else 0.0
+        except Exception:
+            pass
+
         metrics = {
-            "accuracy":  sum(p == l for p, l in zip(all_preds, all_labels)) / len(all_labels),
-            "precision": precision_score(all_labels, all_preds, average="macro", zero_division=0),
-            "recall":    recall_score(all_labels, all_preds, average="macro", zero_division=0),
-            "f1_score":  f1_score(all_labels, all_preds, average="macro", zero_division=0),
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+            "specificity": round(specificity, 6),
+            "sensitivity": round(sensitivity, 6),
         }
         self._print_metrics(metrics)
         return metrics

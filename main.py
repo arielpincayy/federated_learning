@@ -95,23 +95,23 @@ def main():
 
     leaf = len(ips) == 0
 
-    for round in range(H_ROUNDS):
-        logger.info("========================================================================")
-        logger.info(f"=============[HIER] Ronda jerárquica número {round}=====================")
-        logger.info("========================================================================")
+    for h_ronda in range(H_ROUNDS):
+        logger.info("\n========================================================================")
+        logger.info(f"=============[HIER] Ronda jerárquica número {h_ronda}=====================")
+        logger.info("========================================================================\n")
 
         if leaf:
-            fed(central=False, addr=ip, server_addr=ip_father)
+            fed(central=False, addr=ip, server_addr=ip_father, h_ronda=h_ronda)
         elif (not leaf) and (ip_father == ip):
-            fed(central=True, addr=ip, server_addr=ip, childs=ips)
+            fed(central=True, addr=ip, server_addr=ip, childs=ips, h_ronda=h_ronda)
         else:
-            fed(central=True, addr=ip, server_addr=ip_father, childs=ips)
-            fed(central=False, addr=ip, server_addr=ip_father)
+            fed(central=True, addr=ip, server_addr=ip_father, childs=ips, h_ronda=h_ronda)
+            fed(central=False, addr=ip, server_addr=ip_father, h_ronda=h_ronda)
         
-        if round < (H_ROUNDS - 1):
+        if h_ronda < (H_ROUNDS - 1):
             asyncio.run(distribute_model(ips, ip_father, ip))
         
-        logger.info(f"[HIER] Ronda jerárquica número {round} terminada")
+        logger.info(f"[HIER] Ronda jerárquica número {h_ronda} terminada")
 
     logger.info(f"[HIER] Proceso jerárquico terminado")
 

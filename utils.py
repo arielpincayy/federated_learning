@@ -38,76 +38,98 @@ def load_nodes(path: str = NODES_JSON) -> dict[str, str]:
         return json.load(f)
     
 
-def append_metrics(metrics_list: list[dict], round_n: int, K: int = 5, tol: float = 1e-4, path: str = METRICS_CSV) -> bool:
+def append_metrics(
+    metrics_list: list[dict],
+    round_n: int,
+    K: int = 5,
+    tol: float = 1e-4,
+    path: str = METRICS_CSV,
+    convergence_time_s: float | None = None,
+    extra_path: str | None = None,
+) -> bool:
     """
-    Entrada: 
+    Entrada:
         - metrics_list: Lista de dicts de métricas por nodo (incluye métricas de entrenamiento y red).
         - round_n: Número de la ronda actual.
-        - K: Ventana de épocas pasadas para evaluar convergencia.
+        - K: Ventana de rondas pasadas para evaluar convergencia.
         - tol: Tolerancia para determinar si el loss ha dejado de disminuir.
-        - path: Ruta del CSV.
+        - path: Ruta del CSV principal.
+        - convergence_time_s: Tiempo de convergencia global en segundos, si aplica.
+        - extra_path: Ruta del CSV de métricas extra si hay columnas fuera del esquema.
     """
     # 1. Convertir la lista de entrada en un DataFrame de Pandas
     df_new = pd.DataFrame(metrics_list)
     df_new["round"] = round_n
-    
-    # Fieldnames: métricas de entrenamiento + métricas de red
+    if "node" not in df_new.columns:
+        df_new["node"] = "unknown"
+    if "h_ronda" not in df_new.columns:
+        df_new["h_ronda"] = None
+
+    # Fieldnames: métricas de entrenamiento, métricas del modelo, métricas de red y métricas adicionales
     fieldnames = [
-        "round", "node", 
-        "accuracy", "precision", "recall", "f1_score", "trainning_time", "loss",
-        # Métricas de red
-        "net_bytes_tx_system", "net_bytes_rx_system", 
+        "round", "h_ronda", "node",
+        "accuracy", "precision", "recall", "f1_score", "specificity", "sensitivity", "trainning_time", "loss",
+        "latency_model_download_s", "latency_model_upload_s",
+        "net_bytes_tx_system", "net_bytes_rx_system",
         "net_bytes_tx_model", "net_bytes_rx_model",
         "net_packets_sent", "net_packets_recv",
         "net_errors_in", "net_errors_out",
         "net_drops_in", "net_drops_out",
         "net_bandwidth_tx_kbps", "net_bandwidth_rx_kbps",
-        "net_throughput_kbps", "net_transmission_time_s"
+        "net_throughput_kbps", "net_transmission_time_s",
+        "comm_overhead_bytes", "aggregation_time_s", "inter_silo_variance",
+        "converged_round", "convergence_time_s",
+        "cpu_percent", "ram_percent", "cpu_freq_mhz", "open_sockets",
     ]
-    df_new = df_new.reindex(columns=fieldnames)
-    
-    # 2. Guardar/Añadir al archivo CSV
-    write_header = not os.path.exists(path)
-    df_new.to_csv(path, mode="a", index=False, header=write_header)
-    logger.info(f"[CENTRAL] Métricas de ronda {round_n} guardadas en {path}")
-    
-    # 3. Leer el histórico y forzar tipos de datos numéricos
+
+    # 2. Buscar columnas extra y guardarlas en un CSV adicional si hay alguna
+    extra_path = extra_path or path.replace(".csv", "_extra.csv")
+    extra_cols = [col for col in df_new.columns if col not in fieldnames]
+    if extra_cols:
+        extra_cols_ordered = [c for c in ["round", "node", "h_round"] if c in df_new.columns] + extra_cols
+        extra_df = df_new[extra_cols_ordered].copy()
+        write_header_extra = not os.path.exists(extra_path)
+        extra_df.to_csv(extra_path, mode="a", index=False, header=write_header_extra)
+        logger.info(f"[METRICS] Columnas extra guardadas en {extra_path}: {extra_cols}")
+
+    # 3. Evaluar convergencia antes de guardar las métricas actuales
+    existing = pd.DataFrame()
+    if os.path.exists(path):
+        existing = pd.read_csv(path)
+    df_combined = pd.concat([existing, df_new], ignore_index=True, sort=False) if not existing.empty else df_new.copy()
+
     try:
-        df_history = pd.read_csv(path)
-        
-        # Convertimos 'round' y 'loss' a números. 'errors="coerce"' transformará cualquier 
-        # texto inválido en NaN, y luego eliminamos esos NaN.
-        df_history["round"] = pd.to_numeric(df_history["round"], errors="coerce")
-        df_history["loss"] = pd.to_numeric(df_history["loss"], errors="coerce")
-        df_history = df_history.dropna(subset=["round", "loss"])
-        
-        # Aseguramos que las rondas queden como enteros para el ordenamiento y agrupación
-        df_history["round"] = df_history["round"].astype(int)
-        # --------------------------
-        
-        # Agrupar por ronda y calcular el promedio del loss
-        df_rounds = df_history.groupby("round")["loss"].mean().sort_index()
-        
-        # Verificar si tenemos suficientes datos para la ventana K
+        df_combined["round"] = pd.to_numeric(df_combined["round"], errors="coerce")
+        df_combined["loss"] = pd.to_numeric(df_combined["loss"], errors="coerce")
+        df_combined = df_combined.dropna(subset=["round", "loss"])
+        df_combined["round"] = df_combined["round"].astype(int)
+        df_rounds = df_combined.groupby("round")["loss"].mean().sort_index()
+
         if len(df_rounds) >= K:
             recent_losses = df_rounds.tail(K).values
-            
-            # Evaluar la diferencia absoluta consecutiva en la ventana K
             diffs = abs(pd.Series(recent_losses).diff().dropna())
-            
-            if (diffs < tol).all():
-                logger.info(f"[CONVERGENCIA] ¡El modelo ha convergido! El cambio en las últimas {K} rondas es menor a {tol}.")
-                return True
-            else:
-                max_diff = diffs.max()
-                logger.info(f"[ENTRENAMIENTO] Sin convergencia aún. Cambio máximo reciente: {max_diff:.6f} (tol: {tol}).")
-                return False
+            converged = (diffs < tol).all()
         else:
-            logger.info(f"[INFO] Ventana insuficiente para evaluar convergencia. Rondas calculadas: {len(df_rounds)}/{K}")
-            return False
-            
+            converged = False
     except Exception as e:
         logger.error(f"Error al calcular la convergencia: {e}")
+        converged = False
+
+    df_new["converged_round"] = round_n if converged else None
+    df_new["convergence_time_s"] = round(convergence_time_s, 3) if converged and convergence_time_s is not None else None
+
+    # 4. Guardar/Añadir al archivo CSV principal con el esquema conocido
+    df_main = df_new.reindex(columns=fieldnames)
+    write_header = not os.path.exists(path)
+    df_main.to_csv(path, mode="a", index=False, header=write_header)
+    logger.info(f"[CENTRAL] Métricas de ronda {round_n} guardadas en {path}")
+
+    if converged:
+        logger.info(f"[CONVERGENCIA] ¡El modelo ha convergido en la ronda {round_n}! Tiempo de convergencia: {convergence_time_s:.3f}s")
+    else:
+        logger.info(f"[ENTRENAMIENTO] Sin convergencia aún en la ronda {round_n}.")
+
+    return converged
 
 
 async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL_FILENAME) -> str:

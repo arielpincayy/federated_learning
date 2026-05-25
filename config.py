@@ -3,7 +3,7 @@ Configuración centralizada para el sistema de aprendizaje federado.
 """
 
 # ── Hiperparámetros de entrenamiento ───────────────────────────────────
-ROUNDS = 10
+ROUNDS = 5
 EPOCHS = 5
 LEARNING_RATE = 1e-3
 IN_FEATURES = 79
