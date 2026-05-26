@@ -3,6 +3,7 @@ import csv
 import os
 
 import pandas as pd
+import numpy as np
 from config import NODES_JSON, METRICS_CSV, RECEIVED_MODEL_FILENAME
 from logging_config import get_logger
 
@@ -27,6 +28,15 @@ def save_nodes(ips: list[str], path: str = NODES_JSON) -> dict[str, str]:
         json.dump(nodes, f, indent=2)
     logger.info(f"[CENTRAL] Nodos guardados en {path}: {nodes}")
     return nodes
+
+def load_nodes2dict(path: str = NODES_JSON) -> dict[str, str]:
+    """
+    Entrada: ruta del archivo JSON de nodos.
+    Salida: dict con formato {"Nodo_1": "addr", ...} sin la clave "n_nodes".
+    """
+    with open(path, "r") as f:
+        data = json.load(f)
+    return {addr: nid for nid, addr in data.items() if nid != "n_nodes"}
 
 
 def load_nodes(path: str = NODES_JSON) -> dict[str, str]:
@@ -130,6 +140,55 @@ def append_metrics(
         logger.info(f"[ENTRENAMIENTO] Sin convergencia aún en la ronda {round_n}.")
 
     return converged
+
+def hierarchy_convergence(ruta_csv, k=3, tolerancia=1e-4):
+    """
+    Procesa el CSV de entrenamiento federado y determina si el sistema
+    ha convergido basándose en los últimos 'k' h_rondas.
+    
+    Parameters:
+    -----------
+    ruta_csv : str
+        Ruta al archivo CSV con los datos de los nodos.
+    k : int
+        Tamaño de la ventana de tiempo (últimas h_rondas) a evaluar.
+    tolerancia : float, default 1e-4
+        El umbral de cambio máximo permitido en el loss para considerar convergencia.
+        
+    Returns:
+    --------
+    bool
+        True si convergió, False en caso contrario.
+    pd.DataFrame
+        El DataFrame con el histórico del loss promedio por h_ronda para análisis.
+    """
+    # 1. Cargar el dataset
+    # Nota: Si tus columnas están juntas en el archivo real, asegúrate de ajustar los nombres.
+    df = pd.read_csv(ruta_csv)
+    
+    # 2. Extraer el último 'round' de cada nodo en cada 'h_ronda'
+    df_ultimos = df.loc[df.groupby(['h_ronda', 'node'])['round'].idxmax()]
+    
+    # 3. Calcular el loss promedio entre los nodos para cada h_ronda
+    df_promedio = df_ultimos.groupby('h_ronda')['loss'].mean().reset_index()
+    df_promedio = df_promedio.sort_values('h_ronda').reset_index(drop=True)
+    
+    # 4. Verificar si tenemos suficientes datos para la ventana k
+    if len(df_promedio) < k:
+        print(f"Advertencia: No hay suficientes h_rondas ({len(df_promedio)}) para cubrir la ventana k={k}.")
+        return False
+
+    # 5. Evaluar la convergencia en la ventana k (los últimos k h_rondas)
+    ultimos_loss = df_promedio['loss'].iloc[-k:].values
+    
+    # Criterio: Estabilidad (Rango absoluto entre el máximo y mínimo de la ventana)
+    variacion = np.max(ultimos_loss) - np.min(ultimos_loss)
+    
+    # Si la variación en las últimas k rondas es menor al umbral, hay convergencia
+    ha_convergido = variacion < tolerancia
+    
+    return bool(ha_convergido)
+
 
 
 async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL_FILENAME) -> str:

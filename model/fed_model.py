@@ -62,31 +62,37 @@ class ModelTrainer:
     def fit(self, train_loader: DataLoader, criterion: nn.Module, optimizer: torch.optim.Optimizer, epochs: int = EPOCHS) -> tuple[float, float]:
         """
         Entrada: DataLoader de entrenamiento, función de pérdida, optimizador, número de épocas.
-        Salida: tiempo total de entrenamiento en segundos.
+        Salida: Tupla con (tiempo total de entrenamiento en segundos, loss de la última época).
         """
         logger.info(f"\n[TRAINING] Iniciando entrenamiento por {epochs} épocas...")
         start = time.time()
         self.model.train()
         
-        loss = 0
+        last_epoch_loss = 0.0  # Variable limpia para guardar el loss final
+        
         for epoch in range(epochs):
             running_loss = 0.0
             t0 = time.time()
+            
             for inputs, labels in train_loader:
                 inputs, labels = inputs.to(self.device), labels.to(self.device)
+                
                 optimizer.zero_grad()
-                loss = criterion(self.model(inputs), labels)
-                loss.backward()
+                batch_loss = criterion(self.model(inputs), labels)  # Usamos batch_loss aquí
+                batch_loss.backward()
                 optimizer.step()
-                running_loss += loss.item() * inputs.size(0)
+                
+                running_loss += batch_loss.item() * inputs.size(0)
 
             epoch_loss = running_loss / len(train_loader.dataset)
-            loss = epoch_loss
+            last_epoch_loss = epoch_loss  # Se actualiza en cada época, al final quedará la última
+            
             logger.info(f" Época [{epoch+1}/{epochs}] Loss: {epoch_loss:.4f} | {time.time()-t0:.2f}s")
 
         total = time.time() - start
         logger.info(f"[TRAINING] Completado en {total:.2f}s")
-        return total, loss
+        
+        return total, last_epoch_loss
 
     @torch.no_grad()
     def evaluate(self, test_loader: DataLoader) -> dict:

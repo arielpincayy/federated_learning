@@ -1,4 +1,7 @@
 data/
+metrics/
 .venv
 __pycache__/
 */__pycache__/
+*.sh
+*.ipynb

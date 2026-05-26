@@ -49,7 +49,7 @@ class NetworkMetricsCollector:
         """Obtiene estadísticas de la interfaz de red actual."""
         try:
             stats = psutil.net_if_stats()
-            io_counters = psutil.net_io_counters()(pernic=True)
+            io_counters = psutil.net_io_counters(pernic=True)
             
             if self.interface not in io_counters:
                 logger.warning(f"Interfaz {self.interface} no encontrada. Usando la primera disponible.")

@@ -44,28 +44,33 @@ async def send(server_addr: str, message: str):
                 logger.critical(f"[CRITICAL] No se pudo conectar con {uri} tras {max_intentos} intentos.")
 
 async def send_identified(node_addr: str, server_addr: str, message: str | bytes):
-    """
-    Entrada: addr propio del nodo (host:port) usado como identificación,
-             dirección del servidor (host:port), mensaje de texto o bytes a enviar.
-    Salida: ninguna (envía identificación primero, luego el mensaje).
-    """
     host, port = get_ipport(server_addr)
     uri = f"ws://{host}:{port}"
-    try:
-        async with websockets.connect(uri) as websocket:
-            # Identificación
-            await websocket.send(node_addr)
-            ack = await websocket.recv()
-            if ack != ACK_IDENTIFIED:
-                logger.error(f"[ERROR] Identificación rechazada: {ack}")
-                return
+    
+    max_intentos = 3
+    delay_entre_intentos = 2
 
-            # Payload
-            await websocket.send(message)
-            response = await websocket.recv()
-            logger.info(f"[SERVER RESPONSE] {response}")
-    except Exception as e:
-        logger.error(f"[ERROR EN SEND_IDENTIFIED] {e}")
+    for intento in range(1, max_intentos + 1):
+        try:
+            async with websockets.connect(uri) as websocket:
+                await websocket.send(node_addr)
+                ack = await websocket.recv()
+                if ack != ACK_IDENTIFIED:
+                    logger.error(f"[ERROR] Identificación rechazada: {ack}")
+                    return
+
+                await websocket.send(message)
+                response = await websocket.recv()
+                logger.info(f"[SERVER RESPONSE] {response}")
+                return  # Éxito
+
+        except Exception as e:
+            logger.error(f"[ERROR EN SEND_IDENTIFIED] Intento {intento}/{max_intentos} falló: {e}")
+            if intento < max_intentos:
+                logger.info(f"[SEND_IDENTIFIED] Reintentando en {delay_entre_intentos} segundos...")
+                await asyncio.sleep(delay_entre_intentos)
+            else:
+                logger.critical(f"[CRITICAL] No se pudo conectar con {uri} tras {max_intentos} intentos.")
 
 
 async def send_file_identified(node_addr: str, server_addr: str, file_path: str):

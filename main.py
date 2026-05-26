@@ -2,10 +2,10 @@ import asyncio
 import os
 import sys
 import time
-from connections.client import send, send_file_to_nodes
-from connections.server import listener_ips, listener_server
-from config import H_ROUNDS, LISTENER_DURATION, MODEL_PATH, IN_FEATURES
-from utils import get_ipport
+from connections.client import send, send_file_to_nodes, send_message_to_nodes, send_identified
+from connections.server import listener_ips, listener_server, listener_nodes
+from config import H_ROUNDS, LISTENER_DURATION, MODEL_PATH, IN_FEATURES, METRICS_CSV, NODES_JSON
+from utils import get_ipport, hierarchy_convergence, load_nodes2dict
 from federated import main as fed
 from logging_config import get_logger
 from model.create_model import create_model
@@ -57,7 +57,7 @@ async def sharing(ip_father: str, ip: str, ips_children: list[str]):
 async def get_model(local_listen_addr: str, delay: int = LISTENER_DURATION):
     logger.info("[HIER] Esperando modelo del padre...")
 
-    received = await listener_server(local_listen_addr, delay, file_path=MODEL_PATH)
+    received, _ = await listener_server(local_listen_addr, delay, file_path=MODEL_PATH)
     if received is None:
         logger.error("[HIER] No se recibió modelo. Abortando.")
         return
@@ -85,6 +85,56 @@ async def distribute_model(ips_children: list[str], ip_father: str, ip: str):
         logger.info("[HIER] Soy nodo hoja, sin hijos. Distribución completada.")
 
 
+async def convergence(ip_father: str, ip: str, ips_children: list[str], result: list[str]):
+    _, listen_port = get_ipport(ip)
+    local_listen_addr = f"0.0.0.0:{listen_port}"
+
+    convergence_status = "CONVERGED"
+    if os.path.exists(METRICS_CSV):
+        convergence_status = "CONVERGED" if hierarchy_convergence(METRICS_CSV) else "NOT CONVERGED"
+
+
+    if ip_father == ip:
+        nodes_by_addr = load_nodes2dict(NODES_JSON)
+        logger.info("[HIER] Esperando mensaje de convergencia de hijos")
+        conv = await listener_nodes(local_listen_addr, nodes_by_addr, LISTENER_DURATION * 100, message_only=True)
+        logger.info("[HIER] Mensaje de convergencia obtenido")
+        conv_values = [msgs[0] for msgs in conv.values() if msgs]
+        res = 'CONVERGED' if all(v == 'CONVERGED' for v in [*conv_values, convergence_status]) else 'NOT CONVERGED'
+        result.append(res)
+        logger.info("[HIER] Enviando mensaje de convergencia a hijos")
+        await send_message_to_nodes(ips_children, result[-1], LISTENER_DURATION * 10)
+        logger.info("[HIER] Mensaje de convergencia enviado")
+
+    elif len(ips_children):
+        nodes_by_addr = load_nodes2dict(NODES_JSON)
+        logger.info("[HIER] Esperando mensaje de convergencia de hijos")
+        conv = await listener_nodes(local_listen_addr, nodes_by_addr, LISTENER_DURATION * 100, message_only=True)
+        logger.info("[HIER] Mensaje de convergencia obtenido")
+        conv_values = [msgs[0] for msgs in conv.values() if msgs]
+        res = 'CONVERGED' if all(v == 'CONVERGED' for v in [*conv_values, convergence_status]) else 'NOT CONVERGED'
+        result.append(res)
+        logger.info("[HIER] Enviando mensaje de convergencia a padre")
+        await send_identified(ip, ip_father, res)
+        logger.info("[HIER] Mensaje de convergencia enviado")
+        logger.info("[HIER] Esperando mensaje de convergencia de padre")
+        res, _ = await listener_server(local_listen_addr, LISTENER_DURATION * 100)
+        logger.info("[HIER] Mensaje de convergencia obtenido")
+        result.append(res)
+        logger.info("[HIER] Enviando mensaje de convergencia a hijos")
+        await send_message_to_nodes(ips_children, result[-1], LISTENER_DURATION * 10)
+        logger.info("[HIER] Mensaje de convergencia enviado")
+
+    else:
+        logger.info("[HIER] Enviando mensaje de convergencia a padre")
+        await send_identified(ip, ip_father, convergence_status)
+        logger.info("[HIER] Mensaje de convergencia enviado")
+        logger.info("[HIER] Esperando mensaje de convergencia de padre")
+        res, _ = await listener_server(local_listen_addr, LISTENER_DURATION * 100)
+        logger.info("[HIER] Mensaje de convergencia obtenido")
+        result.append(res)
+        logger.info("[HIER] Soy nodo hoja, sin hijos. Distribución completada.")
+
 
 def main():
     ip = sys.argv[1]          # dirección propia host:port
@@ -109,7 +159,14 @@ def main():
             fed(central=False, addr=ip, server_addr=ip_father, h_ronda=h_ronda)
         
         if h_ronda < (H_ROUNDS - 1):
+            result = []
             asyncio.run(distribute_model(ips, ip_father, ip))
+            logger.info(f"[HIER] Analizando convergencia en ronda jerárquica número {h_ronda}")
+            asyncio.run(convergence(ip_father, ip, ips, result))
+            logger.info(f"[HIER] Convergencia {result} en ronda jerárquica número {h_ronda}")
+            if result[-1] == 'CONVERGED':
+                logger.info(f"[HIER] Convergencia alcanzada en ronda jerárquica número {h_ronda}")
+                break
         
         logger.info(f"[HIER] Ronda jerárquica número {h_ronda} terminada")
 

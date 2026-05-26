@@ -7,7 +7,7 @@ ROUNDS = 5
 EPOCHS = 5
 LEARNING_RATE = 1e-3
 IN_FEATURES = 79
-H_ROUNDS = 3
+H_ROUNDS = 5
 
 # ── Rutas de archivos ──────────────────────────────────────────────────
 NODES_JSON = "nodes.json"

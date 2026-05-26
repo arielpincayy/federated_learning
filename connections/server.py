@@ -65,7 +65,7 @@ async def listener_ips(addr: str, duration: int = LISTENER_DURATION) -> list[str
     return addrs
 
 
-async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_path: str = None) -> dict[str, list]:
+async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_path: str = None, message_only: str = False) -> dict[str, list]:
     """
     Entrada: dirección propia (host:port), dict de {addr -> identificador},
              tiempo máximo de escucha en segundos, directorio para guardar archivos.
@@ -125,20 +125,24 @@ async def listener_nodes(addr: str, nodes: dict[str, str], delay: float, save_pa
                         logger.info(f"[SERVER] [{node_id}] str recibido: {message}")
                         results[node_id].append(message)
                         await websocket.send(ACK_MESSAGE_SUCCESS)
-
-                    has_model   = any(isinstance(i, str) and i.endswith(".pt") for i in results[node_id])
-                    has_metrics = any(isinstance(i, str) and not i.endswith(".pt") for i in results[node_id])
-                    if has_model and has_metrics:
-                        # Guardar métricas de red cuando se completa el nodo
-                        net_metrics = metrics.end_monitoring()
-                        node_metrics[node_id] = net_metrics
+                    if message_only:
                         completed.add(node_id)
-                        logger.info(f"[SERVER] [{node_id}] completado ({len(completed)}/{n_expected}) - "
-                                   f"Red: TX={net_metrics.get('net_bytes_tx_system', 0)}B, "
-                                   f"RX={net_metrics.get('net_bytes_rx_system', 0)}B, "
-                                   f"BW={net_metrics.get('net_throughput_kbps', 0):.2f}kbps")
                         if len(completed) >= n_expected:
                             done_event.set()
+                    else:
+                        has_model   = any(isinstance(i, str) and i.endswith(".pt") for i in results[node_id])
+                        has_metrics = any(isinstance(i, str) and not i.endswith(".pt") for i in results[node_id])
+                        if has_model and has_metrics:
+                            # Guardar métricas de red cuando se completa el nodo
+                            net_metrics = metrics.end_monitoring()
+                            node_metrics[node_id] = net_metrics
+                            completed.add(node_id)
+                            logger.info(f"[SERVER] [{node_id}] completado ({len(completed)}/{n_expected}) - "
+                                       f"Red: TX={net_metrics.get('net_bytes_tx_system', 0)}B, "
+                                       f"RX={net_metrics.get('net_bytes_rx_system', 0)}B, "
+                                       f"BW={net_metrics.get('net_throughput_kbps', 0):.2f}kbps")
+                            if len(completed) >= n_expected:
+                                done_event.set()
 
         except websockets.exceptions.ConnectionClosed:
             pass
