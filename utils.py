@@ -59,15 +59,23 @@ def append_metrics(
 ) -> bool:
     """
     Entrada:
-        - metrics_list: Lista de dicts de métricas por nodo (incluye métricas de entrenamiento y red).
+        - metrics_list: Lista de dicts de métricas por nodo.
         - round_n: Número de la ronda actual.
         - K: Ventana de rondas pasadas para evaluar convergencia.
         - tol: Tolerancia para determinar si el loss ha dejado de disminuir.
         - path: Ruta del CSV principal.
         - convergence_time_s: Tiempo de convergencia global en segundos, si aplica.
         - extra_path: Ruta del CSV de métricas extra si hay columnas fuera del esquema.
+
+    Salida: bool indicando si el modelo convergió en esta ronda.
+
+    Notas:
+        - La columna 'converged' siempre se escribe: True si convergió, False si no.
+        - 'converged_round' contiene el número de ronda en que convergió, o None.
+        - 'convergence_time_s' contiene el tiempo de convergencia, o None.
+        - Las métricas de red del central (central_net_*) se incluyen en el esquema
+          principal y van al CSV directamente.
     """
-    # 1. Convertir la lista de entrada en un DataFrame de Pandas
     df_new = pd.DataFrame(metrics_list)
     df_new["round"] = round_n
     if "node" not in df_new.columns:
@@ -75,39 +83,86 @@ def append_metrics(
     if "h_ronda" not in df_new.columns:
         df_new["h_ronda"] = None
 
-    # Fieldnames: métricas de entrenamiento, métricas del modelo, métricas de red y métricas adicionales
+    # Esquema principal del CSV.
+    # Las columnas central_net_* capturan las métricas de red vistas desde el servidor
+    # central (TX al distribuir el modelo global, RX al recibir modelos de los nodos).
     fieldnames = [
+        # ── Identificación ─────────────────────────────────────────────────────
         "round", "h_ronda", "node",
-        "accuracy", "precision", "recall", "f1_score", "specificity", "sensitivity", "trainning_time", "loss",
-        "latency_model_download_s", "latency_model_upload_s",
-        "net_bytes_tx_system", "net_bytes_rx_system",
-        "net_bytes_tx_model", "net_bytes_rx_model",
-        "net_packets_sent", "net_packets_recv",
-        "net_errors_in", "net_errors_out",
-        "net_drops_in", "net_drops_out",
-        "net_bandwidth_tx_kbps", "net_bandwidth_rx_kbps",
-        "net_throughput_kbps", "net_transmission_time_s",
-        "comm_overhead_bytes", "aggregation_time_s", "inter_silo_variance",
-        "converged_round", "convergence_time_s",
-        "cpu_percent", "ram_percent", "cpu_freq_mhz", "open_sockets",
+
+        # ── Métricas de entrenamiento ──────────────────────────────────────────
+        "accuracy", "precision", "recall", "f1_score",
+        "specificity", "sensitivity",
+        "trainning_time", "loss",
+
+        # ── Latencias de comunicación del nodo ────────────────────────────────
+        "latency_model_download_s",   # Tiempo que tardó el nodo en descargar el modelo global
+        "latency_model_upload_s",     # Tiempo que tardó el nodo en subir su modelo entrenado
+
+        # ── Red: métricas del nodo (TX = subida modelo, RX = descarga modelo) ─
+        "net_bytes_tx_model",         # Bytes del modelo enviados por el nodo
+        "net_bytes_tx_system",        # Bytes totales TX del sistema durante la subida
+        "net_bandwidth_tx_kbps",      # Ancho de banda TX del nodo al subir
+        "net_packets_sent",
+        "net_errors_out",
+        "net_drops_out",
+        "net_bytes_rx_model",         # Bytes del modelo recibidos por el nodo
+        "net_bytes_rx_system",        # Bytes totales RX del sistema durante la descarga
+        "net_bandwidth_rx_kbps",      # Ancho de banda RX del nodo al descargar
+        "net_packets_recv",
+        "net_errors_in",
+        "net_drops_in",
+        "net_throughput_kbps",        # Throughput total TX+RX del nodo
+        "net_transmission_time_s",    # Tiempo de transmisión de la subida
+
+        # ── Red: métricas del servidor central ────────────────────────────────
+        "central_net_bytes_rx_model",     # Bytes del modelo recibidos por el central
+        "central_net_bytes_rx_system",    # Bytes totales RX del sistema del central
+        "central_net_bandwidth_rx_kbps",  # BW RX del central al recibir modelo
+        "central_net_throughput_kbps",    # Throughput del central al recibir
+        "central_net_transmission_time_s",# Tiempo de recepción en el central
+        "central_net_bytes_tx_model",     # Bytes del modelo distribuido por el central
+        "central_net_bytes_tx_system",    # Bytes TX del sistema del central al distribuir
+        "central_net_bandwidth_tx_kbps",  # BW TX del central al distribuir
+        "central_latency_model_dist_s",   # Latencia de distribución del modelo global
+
+        # ── Métricas de hardware del nodo ─────────────────────────────────────
+        "cpu_percent",
+        "ram_percent",
+        "cpu_freq_mhz",
+        "open_sockets",
+
+        # ── Métricas de agregación y convergencia ─────────────────────────────
+        "comm_overhead_bytes",        # Bytes extra de comunicación (modelo × (n-1))
+        "aggregation_time_s",         # Tiempo de FedAvg en el central
+        "inter_silo_variance",        # Varianza del loss entre nodos
+        "converged",                  # True/False — siempre presente
+        "converged_round",            # Número de ronda en que convergió, o None
+        "convergence_time_s",         # Tiempo hasta convergencia, o None
     ]
 
-    # 2. Buscar columnas extra y guardarlas en un CSV adicional si hay alguna
+    # ── Columnas extra (fuera del esquema): CSV separado ──────────────────────
     extra_path = extra_path or path.replace(".csv", "_extra.csv")
     extra_cols = [col for col in df_new.columns if col not in fieldnames]
     if extra_cols:
-        extra_cols_ordered = [c for c in ["round", "node", "h_round"] if c in df_new.columns] + extra_cols
+        extra_cols_ordered = [c for c in ["round", "node", "h_ronda"] if c in df_new.columns] + extra_cols
         extra_df = df_new[extra_cols_ordered].copy()
         write_header_extra = not os.path.exists(extra_path)
         extra_df.to_csv(extra_path, mode="a", index=False, header=write_header_extra)
         logger.info(f"[METRICS] Columnas extra guardadas en {extra_path}: {extra_cols}")
 
-    # 3. Evaluar convergencia antes de guardar las métricas actuales
+    # ── Evaluación de convergencia ─────────────────────────────────────────────
     existing = pd.DataFrame()
     if os.path.exists(path):
         existing = pd.read_csv(path)
-    df_combined = pd.concat([existing, df_new], ignore_index=True, sort=False) if not existing.empty else df_new.copy()
 
+    df_combined = (
+        pd.concat([existing, df_new], ignore_index=True, sort=False)
+        if not existing.empty
+        else df_new.copy()
+    )
+
+    converged = False
     try:
         df_combined["round"] = pd.to_numeric(df_combined["round"], errors="coerce")
         df_combined["loss"] = pd.to_numeric(df_combined["loss"], errors="coerce")
@@ -118,28 +173,36 @@ def append_metrics(
         if len(df_rounds) >= K:
             recent_losses = df_rounds.tail(K).values
             diffs = abs(pd.Series(recent_losses).diff().dropna())
-            converged = (diffs < tol).all()
+            converged = bool((diffs < tol).all())
         else:
             converged = False
     except Exception as e:
         logger.error(f"Error al calcular la convergencia: {e}")
         converged = False
 
+    # ── Escribir columnas de convergencia — siempre presentes ─────────────────
+    df_new["converged"] = converged                                          # True o False, nunca None
     df_new["converged_round"] = round_n if converged else None
-    df_new["convergence_time_s"] = round(convergence_time_s, 3) if converged and convergence_time_s is not None else None
+    df_new["convergence_time_s"] = (
+        round(convergence_time_s, 3) if converged and convergence_time_s is not None else None
+    )
 
-    # 4. Guardar/Añadir al archivo CSV principal con el esquema conocido
+    # ── Guardar en CSV principal ───────────────────────────────────────────────
     df_main = df_new.reindex(columns=fieldnames)
     write_header = not os.path.exists(path)
     df_main.to_csv(path, mode="a", index=False, header=write_header)
     logger.info(f"[CENTRAL] Métricas de ronda {round_n} guardadas en {path}")
 
     if converged:
-        logger.info(f"[CONVERGENCIA] ¡El modelo ha convergido en la ronda {round_n}! Tiempo de convergencia: {convergence_time_s:.3f}s")
+        logger.info(
+            f"[CONVERGENCIA] ¡El modelo ha convergido en la ronda {round_n}! "
+            f"Tiempo de convergencia: {convergence_time_s:.3f}s"
+        )
     else:
         logger.info(f"[ENTRENAMIENTO] Sin convergencia aún en la ronda {round_n}.")
 
     return converged
+
 
 def hierarchy_convergence(ruta_csv, k=3, tolerancia=1e-4):
     """
@@ -159,36 +222,25 @@ def hierarchy_convergence(ruta_csv, k=3, tolerancia=1e-4):
     --------
     bool
         True si convergió, False en caso contrario.
-    pd.DataFrame
-        El DataFrame con el histórico del loss promedio por h_ronda para análisis.
     """
-    # 1. Cargar el dataset
-    # Nota: Si tus columnas están juntas en el archivo real, asegúrate de ajustar los nombres.
     df = pd.read_csv(ruta_csv)
     
-    # 2. Extraer el último 'round' de cada nodo en cada 'h_ronda'
     df_ultimos = df.loc[df.groupby(['h_ronda', 'node'])['round'].idxmax()]
     
-    # 3. Calcular el loss promedio entre los nodos para cada h_ronda
     df_promedio = df_ultimos.groupby('h_ronda')['loss'].mean().reset_index()
     df_promedio = df_promedio.sort_values('h_ronda').reset_index(drop=True)
     
-    # 4. Verificar si tenemos suficientes datos para la ventana k
     if len(df_promedio) < k:
         print(f"Advertencia: No hay suficientes h_rondas ({len(df_promedio)}) para cubrir la ventana k={k}.")
         return False
 
-    # 5. Evaluar la convergencia en la ventana k (los últimos k h_rondas)
     ultimos_loss = df_promedio['loss'].iloc[-k:].values
     
-    # Criterio: Estabilidad (Rango absoluto entre el máximo y mínimo de la ventana)
     variacion = np.max(ultimos_loss) - np.min(ultimos_loss)
     
-    # Si la variación en las últimas k rondas es menor al umbral, hay convergencia
     ha_convergido = variacion < tolerancia
     
     return bool(ha_convergido)
-
 
 
 async def _save_file(data: bytes, save_path: str, filename: str = RECEIVED_MODEL_FILENAME) -> str:
